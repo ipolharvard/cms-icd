@@ -78,3 +78,18 @@ def test_live_catalog_keeps_october_and_april_revisions_distinct() -> None:
         dates = dates_by_year[year]
         assert any(value.month == 10 for value in dates)
         assert any(value.month == 4 for value in dates)
+
+
+@pytest.mark.live_cms
+@pytest.mark.live_catalog
+def test_live_catalog_exposes_final_gem_releases() -> None:
+    entries = catalog_entries()
+    available = {
+        (entry.fiscal_year, entry.system)
+        for entry in entries
+        if entry.material == "gems"
+    }
+
+    assert {
+        (year, system) for year in range(2014, 2019) for system in ("cm", "pcs")
+    } <= available

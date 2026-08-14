@@ -362,6 +362,7 @@ class ICD10KnowledgeBase:
         release_date: date | None = None,
         cache_dir: str | Path | None = None,
         fallback: str | None = None,
+        offline: bool = False,
     ) -> Self:
         """Create a lazy selector for an exact CMS fiscal-year snapshot.
 
@@ -376,6 +377,7 @@ class ICD10KnowledgeBase:
                 October 1 preceding the fiscal year.
             cache_dir: Optional artifact cache directory.
             fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
+            offline: Require the catalog and artifacts to already be cached.
         """
         selected_year = fiscal_year if fiscal_year is not None else year
         if selected_year is None:
@@ -385,7 +387,12 @@ class ICD10KnowledgeBase:
         selected_date = release_date or date(selected_year - 1, 10, 1)
         release = Release(selected_year, selected_date)
         return cls(
-            CMSProvider(release, cache_dir=cache_dir, fallback=fallback),
+            CMSProvider(
+                release,
+                cache_dir=cache_dir,
+                fallback=fallback,
+                offline=offline,
+            ),
         )
 
     @classmethod
@@ -395,6 +402,7 @@ class ICD10KnowledgeBase:
         *,
         cache_dir: str | Path | None = None,
         fallback: str | None = None,
+        offline: bool = False,
     ) -> Self:
         """Create a lazy selector for materials applicable on a coding date.
 
@@ -405,6 +413,7 @@ class ICD10KnowledgeBase:
             service_date: Date that controls coding for the record.
             cache_dir: Optional artifact cache directory.
             fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
+            offline: Require the catalog and artifacts to already be cached.
         """
         release = Release(fiscal_year_for(service_date), service_date)
         return cls(
@@ -413,6 +422,7 @@ class ICD10KnowledgeBase:
                 service_date=service_date,
                 cache_dir=cache_dir,
                 fallback=fallback,
+                offline=offline,
             )
         )
 

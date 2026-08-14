@@ -12,16 +12,93 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from functools import reduce
 from operator import mul
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pymupdf
 
 from .exceptions import ParseError
-from .models import Code, Guideline, Node, Term
-from .stores import GuidelineStore, IndexStore, TabularStore
+from .models import Code, GEMDirection, GEMEntry, Guideline, Node, Release, Term
+from .stores import GEMStore, GuidelineStore, IndexStore, TabularStore
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterable
+
+
+_GEM_FILENAMES: dict[tuple[str, GEMDirection], tuple[str, ...]] = {
+    ("cm", GEMDirection.ICD9_TO_ICD10): ("i9gem",),
+    ("cm", GEMDirection.ICD10_TO_ICD9): ("i10gem",),
+    ("pcs", GEMDirection.ICD9_TO_ICD10): ("i9pcs",),
+    ("pcs", GEMDirection.ICD10_TO_ICD9): ("pcsi9",),
+}
+
+
+def parse_gems(
+    paths: Iterable[str | Path],
+    *,
+    system: str,
+    direction: GEMDirection,
+    release: Release | None = None,
+) -> GEMStore:
+    """Parse one official CMS General Equivalence Mapping direction.
+
+    Codes remain strings so leading zeroes are preserved. Exactly one supplied file must
+    match the requested system and direction.
+    """
+    if system not in {"cm", "pcs"}:
+        raise ValueError(f"Unsupported GEM system: {system!r}")
+    markers = _GEM_FILENAMES[(system, direction)]
+    matches = [
+        Path(path)
+        for path in paths
+        if any(marker in Path(path).name.lower() for marker in markers)
+    ]
+    if len(matches) != 1:
+        raise ParseError(
+            f"Expected one {system.upper()} {direction.value} GEM file, "
+            f"found {[path.name for path in matches]}"
+        )
+
+    grouped: dict[str, list[GEMEntry]] = {}
+    path = matches[0]
+    try:
+        lines = path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise ParseError(f"Unable to read GEM file {path}: {exc}") from exc
+    for line_number, raw_line in enumerate(lines, start=1):
+        if not raw_line.strip():
+            continue
+        fields = raw_line.split()
+        if len(fields) != 3 or not re.fullmatch(r"[01]{3}\d{2}", fields[-1]):
+            raise ParseError(f"Invalid GEM record at {path}:{line_number}")
+        source, raw_target, flags = fields
+        approximate, no_map, combination = (flag == "1" for flag in flags[:3])
+        target = None if no_map else raw_target
+        if no_map and raw_target.lower() not in {"nodx", "nopcs"}:
+            raise ParseError(
+                f"GEM no-map record has an unexpected target at {path}:{line_number}"
+            )
+        if not no_map and raw_target.lower() in {"nodx", "nopcs"}:
+            raise ParseError(
+                "GEM target sentinel is missing its no-map flag at "
+                f"{path}:{line_number}"
+            )
+        entry = GEMEntry(
+            source=source,
+            target=target,
+            approximate=approximate,
+            no_map=no_map,
+            combination=combination,
+            scenario=int(flags[3]),
+            choice_list=int(flags[4]),
+        )
+        grouped.setdefault(source, []).append(entry)
+    return GEMStore(
+        {source: tuple(entries) for source, entries in grouped.items()},
+        system=system,
+        direction=direction,
+        release=release,
+    )
 
 
 @dataclass(slots=True)

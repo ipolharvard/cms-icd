@@ -1,8 +1,8 @@
 # CMS ICD
 
-[![CI](https://github.com/ipolharvard/cms-id/actions/workflows/ci.yml/badge.svg)](https://github.com/ipolharvard/cms-id/actions/workflows/ci.yml)
-[![Documentation](https://github.com/ipolharvard/cms-id/actions/workflows/docs.yml/badge.svg)](https://ipolharvard.github.io/cms-id/)
-[![CMS catalog](https://github.com/ipolharvard/cms-id/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-id/actions/workflows/catalog-cms.yml)
+[![CI](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml)
+[![Documentation](https://github.com/ipolharvard/cms-icd/actions/workflows/docs.yml/badge.svg)](https://ipolharvard.github.io/cms-icd/)
+[![CMS catalog](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -16,7 +16,17 @@ CMS-backed discovery supports production ICD-10 releases from FY 2016 onward,
 including advertised intra-year updates.
 
 Full documentation is available at
-[ipolharvard.github.io/cms-id](https://ipolharvard.github.io/cms-id/).
+[ipolharvard.github.io/cms-icd](https://ipolharvard.github.io/cms-icd/).
+
+The package also exposes the official ICD-9/ICD-10 General Equivalence Mappings
+without imposing an application-specific target-selection policy:
+
+```python
+from cms_icd import GEMKnowledgeBase
+
+gems = GEMKnowledgeBase.from_cms(fiscal_year=2018)
+entries = gems.cm.icd9_to_icd10["4280"]
+```
 
 ## Installation
 
@@ -62,7 +72,7 @@ fiscal year. CMS does not always retain every historical revision, so snapshot
 selection is strict by default. Pass `fallback="latest_for_fy"` only when using
 the latest available fiscal-year material is scientifically acceptable.
 
-The [release guide](https://ipolharvard.github.io/cms-id/guide/releases-and-caching/)
+The [release guide](https://ipolharvard.github.io/cms-icd/guide/releases-and-caching/)
 documents supported guideline years and the exact October/April selection
 rules.
 
@@ -117,7 +127,7 @@ when live integration testing is explicitly intended.
 
 CMS compatibility is validated in separate catalog, fresh-current, historical,
 and manual exhaustive lanes. See the
-[testing strategy](https://ipolharvard.github.io/cms-id/testing/).
+[testing strategy](https://ipolharvard.github.io/cms-icd/testing/).
 
 The package depends on PyMuPDF for guideline extraction. Confirm PyMuPDF's
 licensing is suitable for the intended distribution before publishing this

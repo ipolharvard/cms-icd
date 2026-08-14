@@ -52,6 +52,24 @@ CATALOG_HTML = """
 </body></html>
 """
 
+GEM_CATALOG_HTML = """
+<html><body>
+  <h3>Diagnosis Code Set General Equivalence Mappings</h3>
+  <a href="/files/zip/2018-gems.zip">2018 General Equivalence Mappings</a>
+  <a href="/files/zip/2018-reimbursement-mappings.zip">
+    2018 Reimbursement Mappings
+  </a>
+  <h3>Procedure Coding System (ICD-10-PCS)</h3>
+  <a href="/files/zip/2018-pcs-gems.zip">2018 GEMs</a>
+  <a href="/files/zip/2016-gems-dx.zip">
+    2016 General Equivalence Mappings - Diagnosis Codes
+  </a>
+  <a href="/files/zip/2016-gems-proc.zip">
+    2016 General Equivalence Mappings - Procedure Codes
+  </a>
+</body></html>
+"""
+
 
 def test_parse_catalog_distinguishes_initial_and_april_revisions() -> None:
     entries = parse_catalog(CATALOG_HTML)
@@ -82,6 +100,17 @@ def test_parse_catalog_distinguishes_initial_and_april_revisions() -> None:
         "https://www.cms.gov/files/zip/2024-code-tables-updated-04/01/2024.zip"
     ] == date(2023, 10, 1)
     assert {entry.material for entry in entries} == {"tabular", "index", "guidelines"}
+
+
+def test_parse_catalog_discovers_cm_and_pcs_gems_from_section_context() -> None:
+    entries = parse_catalog(GEM_CATALOG_HTML)
+
+    assert [(entry.system, entry.material, entry.fiscal_year) for entry in entries] == [
+        ("cm", "gems", 2018),
+        ("pcs", "gems", 2018),
+        ("cm", "gems", 2016),
+        ("pcs", "gems", 2016),
+    ]
 
 
 def test_exact_revision_inherits_unchanged_material() -> None:
@@ -384,3 +413,14 @@ def test_directory_provider_reports_missing_and_ambiguous_files(
     (tmp_path / "icd10cm_tabular_b.xml").touch()
     with pytest.raises(AmbiguousReleaseError):
         provider.paths("cm", "tabular")
+
+
+def test_offline_provider_requires_cached_catalog(tmp_path: Path) -> None:
+    provider = CMSProvider(
+        Release(2018, date(2017, 10, 1)),
+        cache_dir=tmp_path,
+        offline=True,
+    )
+
+    with pytest.raises(DownloadError, match="cached CMS catalog"):
+        provider.paths("cm", "gems")

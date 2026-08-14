@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from types import MappingProxyType
 from typing import TypeVar
 
-from .models import Code, Guideline, Node, Term
+from .models import Code, GEMDirection, GEMEntry, Guideline, Node, Release, Term
 
 T = TypeVar("T")
 
@@ -34,6 +34,41 @@ class ReadOnlyStore[T](Mapping[str, T]):
 
     def __len__(self) -> int:
         return len(self._values)
+
+
+class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
+    """Immutable GEM relationships grouped by source code.
+
+    A source may have several entries. Their order is deterministic and retains the
+    official scenario and choice-list information; consumers decide how to resolve those
+    alternatives.
+    """
+
+    def __init__(
+        self,
+        values: Mapping[str, tuple[GEMEntry, ...]],
+        *,
+        system: str,
+        direction: GEMDirection,
+        release: Release | None = None,
+    ) -> None:
+        ordered = {
+            source: tuple(
+                sorted(
+                    entries,
+                    key=lambda item: (
+                        item.scenario,
+                        item.choice_list,
+                        item.target or "",
+                    ),
+                )
+            )
+            for source, entries in sorted(values.items())
+        }
+        super().__init__(ordered)
+        self.system = system
+        self.direction = direction
+        self.release = release
 
 
 class TabularStore(ReadOnlyStore[Node]):

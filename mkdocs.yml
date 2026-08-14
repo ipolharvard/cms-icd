@@ -1,8 +1,8 @@
 site_name: CMS ICD
 site_description: Version-aware structured access to official CMS ICD-10 materials
-site_url: https://ipolharvard.github.io/cms-id/
-repo_url: https://github.com/ipolharvard/cms-id
-repo_name: ipolharvard/cms-id
+site_url: https://ipolharvard.github.io/cms-icd/
+repo_url: https://github.com/ipolharvard/cms-icd
+repo_name: ipolharvard/cms-icd
 edit_uri: edit/main/docs/
 
 theme:
@@ -37,8 +37,10 @@ nav:
       - Getting started: guide/getting-started.md
       - Releases and caching: guide/releases-and-caching.md
       - Local and custom sources: guide/local-sources.md
+      - General Equivalence Mappings: guide/general-equivalence-mappings.md
   - API reference:
       - Knowledge bases: reference/knowledge-base.md
+      - GEM API: reference/gems.md
       - Records: reference/models.md
       - Stores: reference/stores.md
       - Sources: reference/sources.md

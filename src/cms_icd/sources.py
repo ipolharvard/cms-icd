@@ -52,6 +52,8 @@ _PATTERNS: dict[tuple[str, str], tuple[str, ...]] = {
     ("pcs", "tabular"): ("*icd10pcs_tables*.xml",),
     ("pcs", "index"): ("*icd10pcs_index*.xml",),
     ("pcs", "guidelines"): ("*pcs*guidelines*.pdf",),
+    ("cm", "gems"): ("*i9gem*.txt", "*i10gem*.txt"),
+    ("pcs", "gems"): ("*i9pcs*.txt", "*pcsi9*.txt"),
 }
 
 
@@ -88,22 +90,32 @@ def fiscal_year_for(value: date) -> int:
     return value.year + 1 if (value.month, value.day) >= (10, 1) else value.year
 
 
-def _infer_system(label: str, href: str) -> str | None:
+def _infer_system(label: str, href: str, section: str = "") -> str | None:
     text = f"{label} {href}".lower()
-    if "pcs" in text:
+    if "pcs" in text or "procedure code" in text:
         return "pcs"
     if (
         "cm" in text
+        or "diagnosis code" in text
         or "code tables, tabular and index" in text
         or "code tables and index" in text
         or "coding guidelines" in text
     ):
+        return "cm"
+    section_text = section.lower()
+    if "pcs" in section_text or "procedure code" in section_text:
+        return "pcs"
+    if "cm" in section_text or "diagnosis code" in section_text:
         return "cm"
     return None
 
 
 def _infer_material(label: str, href: str) -> str | None:
     text = f"{label} {href}".lower()
+    if "reimbursement" in text or "conversion table" in text:
+        return None
+    if re.search(r"\bgems?\b", text) or "general equivalence" in text:
+        return "gems"
     if "guideline" in text:
         return "guidelines"
     if "table" in text and "index" in text:
@@ -142,7 +154,9 @@ def parse_catalog(
     for anchor in soup.find_all("a", href=True):
         label = " ".join(anchor.get_text(" ", strip=True).split())
         href = str(anchor["href"])
-        system = _infer_system(label, href)
+        heading = anchor.find_previous(["h1", "h2", "h3", "h4", "h5", "h6"])
+        section = heading.get_text(" ", strip=True) if heading is not None else ""
+        system = _infer_system(label, href, section)
         material = _infer_material(label, href)
         fiscal_year = _infer_year(label, href)
         if system is None or material is None or fiscal_year is None:
@@ -206,7 +220,7 @@ class DirectoryProvider(MaterialProvider):
             raise MaterialUnavailableError(
                 f"No {system.upper()} {material} material found in {self.directory}"
             )
-        if material != "index" and len(matches) != 1:
+        if material not in {"index", "gems"} and len(matches) != 1:
             raise AmbiguousReleaseError(
                 f"Expected one {system.upper()} {material} file in {self.directory}, "
                 f"found {[path.name for path in matches]}"
@@ -256,6 +270,7 @@ class CMSProvider(MaterialProvider):
         service_date: date | None = None,
         cache_dir: str | Path | None = None,
         fallback: str | None = None,
+        offline: bool = False,
         session: requests.Session | None = None,
     ) -> None:
         self.release = release
@@ -264,11 +279,39 @@ class CMSProvider(MaterialProvider):
             Path(cache_dir) if cache_dir is not None else default_cache_dir()
         )
         self.fallback = fallback
+        self.offline = offline
         self._session = session or requests.Session()
         self._catalog: tuple[CatalogEntry, ...] | None = None
 
     def _load_catalog(self) -> tuple[CatalogEntry, ...]:
         if self._catalog is None:
+            catalog_path = self.cache_dir / "catalog.json"
+            if self.offline:
+                try:
+                    records = json.loads(catalog_path.read_text(encoding="utf-8"))
+                    self._catalog = tuple(
+                        CatalogEntry(
+                            **{
+                                **record,
+                                "release_date": date.fromisoformat(
+                                    record["release_date"]
+                                ),
+                            }
+                        )
+                        for record in records
+                    )
+                except (
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    raise DownloadError(
+                        "Offline mode requires a valid cached CMS catalog at "
+                        f"{catalog_path}"
+                    ) from exc
+                return self._catalog
             entries: list[CatalogEntry] = []
             for url in (CMS_CATALOG_URL, CMS_ARCHIVE_URL):
                 try:
@@ -280,6 +323,31 @@ class CMSProvider(MaterialProvider):
                     ) from exc
                 entries.extend(parse_catalog(response.text, url))
             self._catalog = tuple(dict.fromkeys(entries))
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            records = [
+                {
+                    "system": entry.system,
+                    "material": entry.material,
+                    "fiscal_year": entry.fiscal_year,
+                    "release_date": entry.release_date.isoformat(),
+                    "label": entry.label,
+                    "url": entry.url,
+                    "page_url": entry.page_url,
+                }
+                for entry in self._catalog
+            ]
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.cache_dir,
+                prefix="catalog.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                json.dump(records, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+            temporary.replace(catalog_path)
         return self._catalog
 
     def _select(self, system: str, material: str) -> CatalogEntry:
@@ -505,6 +573,10 @@ class CMSProvider(MaterialProvider):
                     return artifact, expected
             if artifact_dir.exists():
                 shutil.rmtree(artifact_dir)
+            if self.offline:
+                raise DownloadError(
+                    f"Offline mode requires a valid cached CMS artifact for {entry.url}"
+                )
             try:
                 response = self._session.get(entry.url, timeout=60, stream=True)
                 response.raise_for_status()

@@ -8,6 +8,7 @@ compatibility method for consumers migrating from Pydantic models.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -55,6 +56,31 @@ class Release(Record):
 
     fiscal_year: int
     release_date: date
+
+
+class GEMDirection(StrEnum):
+    """Direction of an ICD-9/ICD-10 General Equivalence Mapping."""
+
+    ICD9_TO_ICD10 = "icd9_to_icd10"
+    ICD10_TO_ICD9 = "icd10_to_icd9"
+
+
+@dataclass(frozen=True, slots=True)
+class GEMEntry(Record):
+    """One official CMS General Equivalence Mapping relationship.
+
+    ``target`` is ``None`` when CMS marks the source code as having no mapping. The
+    remaining fields expose the five flags from the official GEM layout without applying
+    a consumer-specific choice policy.
+    """
+
+    source: str
+    target: str | None
+    approximate: bool
+    no_map: bool
+    combination: bool
+    scenario: int
+    choice_list: int
 
 
 @dataclass(frozen=True, slots=True)
