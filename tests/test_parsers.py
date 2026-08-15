@@ -3,8 +3,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pypdf import PdfWriter
 
 from cms_icd.exceptions import ParseError
+from cms_icd.guidelines import (
+    _outline_entries,
+    _page_text,
+    _text_position,
+    parse_guidelines,
+)
 from cms_icd.parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
 
 if TYPE_CHECKING:
@@ -96,3 +103,87 @@ def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) ->
     assert main.title == "Hypertension"
     assert main.optional_modifiers == ("arterial",)
     assert child.path == "Hypertension, secondary"
+
+
+class _MediaBox:
+    height = 1_000
+
+
+class _Page:
+    mediabox = _MediaBox()
+
+    def extract_text(self, *, visitor_text):
+        identity = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        visitor_text(
+            "Page 1 of 2",
+            identity,
+            (1.0, 0.0, 0.0, 1.0, 10.0, 20.0),
+            None,
+            10.0,
+        )
+        visitor_text(
+            "ICD-10-CM Official Guidelines",
+            identity,
+            (1.0, 0.0, 0.0, 1.0, 10.0, -20.0),
+            None,
+            10.0,
+        )
+        return (
+            "ICD-10-CM Official Guidelines for Coding and Reporting\n"
+            "FY 2026\n"
+            "Page 1 of 2\n"
+            "Body cites the ICD-10-CM Official Guidelines.\n"
+            "Page 1 of 2\n"
+        )
+
+
+class _Destination:
+    def __init__(self, title: str, page: int) -> None:
+        self.title = title
+        self.page = page
+
+
+class _Reader:
+    def __init__(self) -> None:
+        first = _Destination("Section I. Conventions", 0)
+        child = _Destination("A. Basic conventions", 1)
+        self.outline = [first, [child]]
+
+    def get_destination_page_number(self, destination: _Destination) -> int:
+        return destination.page
+
+
+def test_guideline_page_text_removes_only_positioned_footer() -> None:
+    text = _page_text(_Page())  # type: ignore[arg-type]
+
+    assert text == "Body cites the ICD-10-CM Official Guidelines."
+
+
+def test_text_position_applies_page_transformation() -> None:
+    assert _text_position(
+        (1.0, 0.0, 0.0, 1.0, 4.0, 5.0),
+        (2.0, 0.0, 0.0, 3.0, 10.0, 20.0),
+    ) == (18.0, 35.0)
+
+
+def test_guideline_outline_preserves_nested_levels_and_one_based_pages() -> None:
+    assert list(_outline_entries(_Reader())) == [  # type: ignore[arg-type]
+        (1, "Section I. Conventions", 1),
+        (2, "A. Basic conventions", 2),
+    ]
+
+
+def test_cm_guideline_parser_requires_structured_outline(tmp_path: Path) -> None:
+    path = tmp_path / "guidelines.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    with pytest.raises(ParseError, match="No structured CM guideline outline"):
+        parse_guidelines(path, system="cm")
+
+
+def test_guideline_parser_rejects_unknown_system(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unsupported guideline system"):
+        parse_guidelines(tmp_path / "unused.pdf", system="icd9")

@@ -7,8 +7,9 @@ from datetime import date
 from threading import Lock
 from typing import TYPE_CHECKING, Self
 
+from .guidelines import parse_guidelines
 from .models import Code, Guideline, InstructionalNote, Node, Release, Term
-from .parsers import parse_cm_tabular, parse_guidelines, parse_index, parse_pcs_tabular
+from .parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
 from .sources import CMSProvider, DirectoryProvider, MaterialProvider, fiscal_year_for
 from .stores import GuidelineStore, IndexStore, TabularStore, _natural_sort_key
 
@@ -375,7 +376,8 @@ class ICD10KnowledgeBase:
             year: Compatibility alias for ``fiscal_year``.
             release_date: Effective date of the requested revision. Defaults to
                 October 1 preceding the fiscal year.
-            cache_dir: Optional artifact cache directory.
+            cache_dir: Persistent artifact cache directory. ``None`` uses the
+                platform default cache directory.
             fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
             offline: Require the catalog and artifacts to already be cached.
         """
@@ -411,7 +413,8 @@ class ICD10KnowledgeBase:
 
         Args:
             service_date: Date that controls coding for the record.
-            cache_dir: Optional artifact cache directory.
+            cache_dir: Persistent artifact cache directory. ``None`` uses the
+                platform default cache directory.
             fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
             offline: Require the catalog and artifacts to already be cached.
         """

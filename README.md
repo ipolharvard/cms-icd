@@ -49,7 +49,13 @@ when its mapping encounters an introduced or retired source/target code.
 
 ## Installation
 
-Install an internal Git checkout with `uv`:
+Install the published package with `uv`:
+
+```bash
+uv add cms-icd
+```
+
+For development, install an editable checkout:
 
 ```bash
 uv pip install -e /path/to/cms-icd
@@ -148,6 +154,5 @@ CMS compatibility is validated in separate catalog, fresh-current, historical,
 and manual exhaustive lanes. See the
 [testing strategy](https://ipolharvard.github.io/cms-icd/testing/).
 
-The package depends on PyMuPDF for guideline extraction. Confirm PyMuPDF's
-licensing is suitable for the intended distribution before publishing this
-library outside the organization.
+`cms-icd` is an independent open-source project. It is not affiliated with,
+endorsed by, or sponsored by the Centers for Medicare & Medicaid Services.

@@ -48,3 +48,18 @@ same site and deploys it through GitHub Actions to GitHub Pages.
 
 The repository's **Settings → Pages → Build and deployment → Source** must be
 set to **GitHub Actions**.
+
+## Publishing releases
+
+Production releases use PyPI Trusted Publishing; no API token is stored in
+GitHub. One-time setup requires:
+
+1. Add the `cms-icd` project to the IPOL organization on PyPI.
+2. Create a protected GitHub environment named `pypi` with required reviewers.
+3. Register a GitHub publisher for owner `ipolharvard`, repository `cms-icd`,
+   workflow `publish.yml`, and environment `pypi` in the PyPI project settings.
+
+Set the package version in `pyproject.toml`, merge the validated change to
+`main`, and publish a GitHub Release whose tag is exactly `v<version>`. The
+workflow builds and validates the distributions in a job without publishing
+credentials, then passes only those artifacts to the protected publishing job.

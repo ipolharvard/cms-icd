@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CMS_ICD_LIVE_CACHE: ~/.cache/cms-icd/live-tests
+      CMS_ICD_LIVE_CACHE: ~/.cache/ipolharvard/cms_icd/live-tests
       CMS_ICD_DIAGNOSTIC_DIR: .cms-diagnostics/historical
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
         run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/cms-icd
+          path: ~/.cache/ipolharvard/cms_icd
           key: cms-icd-historical-${{ runner.os }}-${{ steps.cache-generation.outputs.value }}
       - run: uv pip install --system -e ".[dev]"
       - run: pytest -q --tb=line -m live_historical tests/live
@@ -61,5 +61,5 @@ jobs:
           name: historical-cms-diagnostics
           path: |
             .cms-diagnostics/historical
-            ~/.cache/cms-icd/live-tests/fy*/**/manifest.json
+            ~/.cache/ipolharvard/cms_icd/live-tests/fy*/**/manifest.json
           if-no-files-found: ignore

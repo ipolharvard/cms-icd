@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 CMS_CATALOG_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes"
 CMS_ARCHIVE_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-10-cm-icd-10-pcs-gem-archive"
+_PACKAGE_NAME = "cms-icd"
+_CACHE_SUBDIRECTORY = Path("ipolharvard") / _PACKAGE_NAME.replace("-", "_")
 
 _PATTERNS: dict[tuple[str, str], tuple[str, ...]] = {
     ("cm", "tabular"): ("icd10cm_tabular*.xml", "tabular.xml"),
@@ -243,7 +245,8 @@ class DirectoryProvider(MaterialProvider):
 def default_cache_dir() -> Path:
     """Return the platform-appropriate default cache directory."""
     base = os.environ.get("XDG_CACHE_HOME")
-    return Path(base) / "cms-icd" if base else Path.home() / ".cache" / "cms-icd"
+    cache_root = Path(base) if base else Path.home() / ".cache"
+    return cache_root / _CACHE_SUBDIRECTORY
 
 
 @contextmanager

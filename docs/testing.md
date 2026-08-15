@@ -128,6 +128,17 @@ Run it before changing catalog discovery, archive patterns, or parsers, and
 before claiming support for a newly published fiscal year. Results are written
 to `.cms-diagnostics/exhaustive-results.json`.
 
+Guideline results include deterministic fingerprints of their keys, titles,
+preambles, and whitespace-normalized content. Comparisons are performed by the
+test code; successful runs do not print hashes, while failures identify the
+release and material and retain detailed diagnostics as a workflow artifact.
+
+The PyMuPDF-to-pypdf migration preserved the public guideline hierarchy and
+canonical PCS text across the cached compatibility corpus. The reviewed CM
+differences normalize PDF font spacing and correct the former footer heuristic:
+body-text references to the *ICD-10-CM Official Guidelines for Coding and
+Reporting* are now retained instead of being mistaken for running footers.
+
 ## Failure diagnostics
 
 GitHub Actions uploads diagnostics even when a live job fails. Depending on the

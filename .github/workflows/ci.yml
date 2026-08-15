@@ -31,3 +31,20 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system -e ".[dev]"
       - run: pytest
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - run: uvx --from twine twine check --strict dist/*
+      - name: Install and inspect wheel
+        run: |
+          wheel="$(find dist -name '*.whl' -print -quit)"
+          uv venv .package-venv
+          uv pip install --python .package-venv/bin/python "$wheel"
+          .package-venv/bin/python scripts/check_wheel.py "$wheel"

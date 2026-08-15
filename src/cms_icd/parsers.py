@@ -1,4 +1,4 @@
-"""Parsers for CMS ICD XML and PDF materials.
+"""Parsers for CMS ICD XML and text materials.
 
 Parser functions validate relationships before returning immutable stores. They do not
 mutate public knowledge-base objects.
@@ -15,11 +15,9 @@ from operator import mul
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pymupdf
-
 from .exceptions import ParseError
-from .models import Code, GEMDirection, GEMEntry, Guideline, Node, Release, Term
-from .stores import GEMStore, GuidelineStore, IndexStore, TabularStore
+from .models import Code, GEMDirection, GEMEntry, Node, Release, Term
+from .stores import GEMStore, IndexStore, TabularStore
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -555,149 +553,3 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                 parent_path="",
             )
     return IndexStore({key: Term(**values) for key, values in drafts.items()})
-
-
-_SECTION = re.compile(r"Section\s+(IV|I{1,3})\b", re.I)
-_SUBSECTION = re.compile(r"^([A-Z])\.\s")
-_NUMBER = re.compile(r"^(\d+)\.\s")
-
-
-def _page_text(page: pymupdf.Page) -> str:
-    blocks = page.get_text("blocks")
-    threshold = page.rect.height * 0.92
-    footer = re.compile(r"Official\s+Guidelines|Page\s+\d+\s+of\s+\d+", re.I)
-    footer_text = {
-        block[4].strip()
-        for block in blocks
-        if block[6] == 0 and block[3] >= threshold and footer.search(block[4])
-    }
-    text = page.get_text()
-    for item in footer_text:
-        text = text.replace(item, "")
-    return re.sub(r"^(\d+\.)\s*\n\s*", r"\n\1 ", text, flags=re.M).strip()
-
-
-def _strip_header(title: str, content: str) -> str:
-    words = [re.escape(word) for word in title.split()]
-    if not words:
-        return content
-    return re.sub(
-        r"^.*?" + r"\s+".join(words), "", content, count=1, flags=re.I | re.S
-    ).strip()
-
-
-def parse_guidelines(path: str | Path, *, system: str) -> GuidelineStore:
-    """Parse an official coding-guidelines PDF.
-
-    CM PDFs receive dotted section keys. PCS PDFs, whose outlines vary more by release,
-    are exposed as one deterministic ``document`` guideline.
-    """
-    try:
-        document = pymupdf.open(path)
-    except Exception as exc:
-        raise ParseError(
-            f"Unable to open ICD-10-{system.upper()} guidelines {path}: {exc}"
-        ) from exc
-    with document:
-        if system == "pcs":
-            content = "\n".join(_page_text(page) for page in document)
-            guideline = Guideline(
-                "document", "document", "Official Guidelines", content
-            )
-            return GuidelineStore(
-                {"document": guideline}, {"document": guideline.title}
-            )
-
-        toc = document.get_toc(simple=True)
-        entries: list[dict[str, object]] = []
-        current_section: str | None = None
-        current_subsection: str | None = None
-        for level, raw_title, page_number in toc:
-            if level == 1 and (match := _SECTION.search(raw_title)):
-                current_section = match.group(1).upper()
-                current_subsection = None
-                title = re.sub(
-                    r"Section\s+(?:IV|I{1,3})\.\s*", "", raw_title, count=1, flags=re.I
-                ).strip()
-                entries.append(
-                    {
-                        "key": current_section,
-                        "title": title,
-                        "page": int(page_number),
-                        "level": 1,
-                        "raw_title": raw_title,
-                    }
-                )
-            elif (
-                level == 2
-                and current_section
-                and (match := _SUBSECTION.match(raw_title))
-            ):
-                current_subsection = f"{current_section}.{match.group(1)}"
-                entries.append(
-                    {
-                        "key": current_subsection,
-                        "title": raw_title[match.end() :].strip(),
-                        "page": int(page_number),
-                        "level": 2,
-                        "raw_title": raw_title,
-                    }
-                )
-            elif (
-                level == 3
-                and current_subsection
-                and (match := _NUMBER.match(raw_title))
-            ):
-                entries.append(
-                    {
-                        "key": f"{current_subsection}.{match.group(1)}",
-                        "title": raw_title[match.end() :].strip(),
-                        "page": int(page_number),
-                        "level": 3,
-                        "raw_title": raw_title,
-                    }
-                )
-        if not entries:
-            raise ParseError(f"No structured CM guideline outline found in {path}")
-        for index, entry in enumerate(entries):
-            entry["leaf"] = index == len(entries) - 1 or int(
-                entries[index + 1]["level"]
-            ) <= int(entry["level"])
-        first_page = int(entries[0]["page"])
-        full_text = "\n".join(
-            _page_text(document[number])
-            for number in range(first_page - 1, document.page_count)
-        )
-        search_from = 0
-        for entry in entries:
-            words = str(entry["raw_title"]).split()[:8]
-            pattern = r"\s+".join(re.escape(word) for word in words)
-            match = re.search(pattern, full_text[search_from:], re.I | re.M)
-            entry["position"] = search_from + match.start() if match else None
-            if match:
-                search_from = int(entry["position"])
-        titles = {str(entry["key"]): str(entry["title"]) for entry in entries}
-        guidelines: dict[str, Guideline] = {}
-        preambles: dict[str, str] = {}
-        for index, entry in enumerate(entries):
-            position = entry["position"]
-            if position is None:
-                continue
-            later = [
-                item for item in entries[index + 1 :] if item["position"] is not None
-            ]
-            end = int(later[0]["position"]) if later else len(full_text)
-            content = full_text[int(position) : end].strip()
-            key = str(entry["key"])
-            if entry["leaf"]:
-                guidelines[key] = Guideline(
-                    id=key.replace(".", "_"),
-                    number=key,
-                    title=str(entry["title"]),
-                    content=content,
-                )
-            else:
-                body = _strip_header(str(entry["title"]), content)
-                if body:
-                    preambles[key] = body
-        return GuidelineStore(guidelines, titles, preambles)

@@ -4,7 +4,7 @@ import io
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from typing import TYPE_CHECKING
+from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
@@ -17,10 +17,12 @@ from cms_icd.exceptions import (
     ReleaseUnavailableError,
 )
 from cms_icd.models import Release
-from cms_icd.sources import CMSProvider, DirectoryProvider, parse_catalog
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from cms_icd.sources import (
+    CMSProvider,
+    DirectoryProvider,
+    default_cache_dir,
+    parse_catalog,
+)
 
 CATALOG_HTML = """
 <html><body>
@@ -87,6 +89,40 @@ LEGACY_TABLE_CATALOG_HTML = """
   </ul>
 </body></html>
 """
+
+
+def test_default_cache_uses_namespaced_home_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setenv("HOME", "/tmp/example-home")
+
+    assert default_cache_dir() == Path("/tmp/example-home/.cache/ipolharvard/cms_icd")
+
+
+def test_default_cache_honors_xdg_cache_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", "/tmp/example-cache")
+
+    assert default_cache_dir() == Path("/tmp/example-cache/ipolharvard/cms_icd")
+
+
+def test_provider_accepts_path_and_string_cache_directories(tmp_path: Path) -> None:
+    path_cache = tmp_path / "path-cache"
+    string_cache = tmp_path / "string-cache"
+
+    path_provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=path_cache,
+    )
+    string_provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=str(string_cache),
+    )
+
+    assert path_provider.cache_dir == path_cache
+    assert string_provider.cache_dir == string_cache
+    assert not path_cache.exists()
+    assert not string_cache.exists()
 
 
 def test_parse_catalog_distinguishes_initial_and_april_revisions() -> None:

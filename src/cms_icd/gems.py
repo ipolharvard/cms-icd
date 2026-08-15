@@ -144,7 +144,14 @@ class GEMKnowledgeBase:
         cache_dir: str | Path | None = None,
         offline: bool = False,
     ) -> Self:
-        """Create a lazy GEM selector for an official CMS fiscal year."""
+        """Create a lazy GEM selector for an official CMS fiscal year.
+
+        Args:
+            fiscal_year: Official CMS GEM fiscal year.
+            cache_dir: Persistent artifact cache directory. ``None`` uses the
+                platform default cache directory.
+            offline: Require the catalog and artifacts to already be cached.
+        """
         release = Release(fiscal_year, date(fiscal_year - 1, 10, 1))
         return cls(
             CMSProvider(
@@ -169,6 +176,14 @@ class GEMKnowledgeBase:
         row sets are adopted only until that source encounters an introduced or retired
         source/target code. Corrections are reviewed through FY2018 by default, the last
         CMS GEM release.
+
+        Args:
+            fiscal_year: Historical vocabulary fiscal year.
+            corrections_through_fiscal_year: Last GEM release considered for safe
+                corrections.
+            cache_dir: Persistent artifact cache directory shared by all releases.
+                ``None`` uses the platform default cache directory.
+            offline: Require the catalog and artifacts to already be cached.
         """
         if corrections_through_fiscal_year < fiscal_year:
             raise ValueError(

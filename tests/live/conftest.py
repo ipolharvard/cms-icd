@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import unicodedata
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from cms_icd.sources import CatalogEntry
+    from cms_icd.stores import GuidelineStore
 
 
 SYSTEM_MATERIALS = tuple(
@@ -34,6 +37,29 @@ def write_diagnostic(name: str, value: object) -> None:
     (diagnostic_dir() / name).write_text(
         json.dumps(value, indent=2, sort_keys=True, default=str) + "\n"
     )
+
+
+def guideline_fingerprint(store: GuidelineStore) -> str:
+    """Return a compact canonical fingerprint without printing guideline text."""
+
+    def normalize(value: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", value).split())
+
+    payload = {
+        "titles": {key: normalize(value) for key, value in store.titles.items()},
+        "preambles": {key: normalize(value) for key, value in store.preambles.items()},
+        "guidelines": {
+            key: {
+                "id": item.id,
+                "number": item.number,
+                "title": normalize(item.title),
+                "content": normalize(item.content),
+            }
+            for key, item in store.items()
+        },
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode()).hexdigest()
 
 
 def catalog_entries() -> tuple[CatalogEntry, ...]:

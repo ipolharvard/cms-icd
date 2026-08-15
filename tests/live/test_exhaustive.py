@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from conftest import (
     catalog_entries,
+    guideline_fingerprint,
     latest_complete_release,
     release_dates,
     write_diagnostic,
@@ -35,6 +36,7 @@ def test_every_advertised_snapshot_and_material_parses(
                 "fiscal_year": year,
                 "release_date": effective,
                 "materials": {},
+                "guideline_fingerprints": {},
             }
             for system, material in (
                 ("cm", "tabular"),
@@ -51,6 +53,17 @@ def test_every_advertised_snapshot_and_material_parses(
                     snapshot["materials"][name] = type(exc).__name__
                 else:
                     snapshot["materials"][name] = len(value)
+                    if material == "guidelines":
+                        if system == "cm":
+                            assert len(value) > 10
+                            assert {"I", "II", "III", "IV"} <= set(value.titles)
+                            assert all(item.content.strip() for item in value.values())
+                        else:
+                            assert set(value) == {"document"}
+                            assert len(value["document"].content) > 10_000
+                        snapshot["guideline_fingerprints"][name] = (
+                            guideline_fingerprint(value)
+                        )
             results.append(snapshot)
     write_diagnostic("exhaustive-results.json", results)
 

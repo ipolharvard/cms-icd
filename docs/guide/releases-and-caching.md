@@ -155,11 +155,14 @@ icd = ICD10KnowledgeBase.from_cms(
 By default, files are cached under:
 
 ```text
-${XDG_CACHE_HOME}/cms-icd
+${XDG_CACHE_HOME}/ipolharvard/cms_icd
 ```
 
-or `~/.cache/cms-icd` when `XDG_CACHE_HOME` is not set. Set `cache_dir` to keep
-artifacts with a project or shared application cache:
+or `~/.cache/ipolharvard/cms_icd` when `XDG_CACHE_HOME` is not set. The package
+does not automatically inspect or migrate the former `cms-icd` cache directory.
+Every CMS-backed ICD and GEM constructor accepts `cache_dir` as either a string
+or a [`pathlib.Path`](https://docs.python.org/3/library/pathlib.html#pathlib.Path).
+Set it to keep artifacts with a project, scratch, or shared application cache:
 
 ```python
 icd = ICD10KnowledgeBase.for_date(
@@ -167,6 +170,28 @@ icd = ICD10KnowledgeBase.for_date(
     cache_dir="data/cms_icd",
 )
 ```
+
+There is no separate cache enable/disable switch. CMS archives must be stored
+and extracted before they can be parsed, so disabling persistence would still
+require a temporary directory. Applications that need ephemeral storage can
+own its lifetime explicitly:
+
+```python
+from datetime import date
+from tempfile import TemporaryDirectory
+
+with TemporaryDirectory() as cache_dir:
+    icd = ICD10KnowledgeBase.for_date(
+        date(2026, 5, 1),
+        cache_dir=cache_dir,
+    )
+    code = icd.cm["I10"]
+```
+
+Keep all material access inside the context because the directory is removed
+when the block exits. `offline=True` has different semantics: it prohibits
+network access and requires the selected catalog and artifacts to exist in the
+chosen cache directory.
 
 Downloaded artifacts are keyed by URL, checksummed with SHA-256, and reused when
 one CMS bundle supplies multiple lazy stores. Extraction uses a directory lock

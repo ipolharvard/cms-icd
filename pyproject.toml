@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "Version-aware structured access to official CMS ICD-10 materials"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["CMS", "ICD-10", "ICD-10-CM", "ICD-10-PCS", "healthcare"]
 authors = [
     { name = "Pawel Renc" },
 ]
@@ -16,7 +18,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Healthcare Industry",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -25,9 +26,14 @@ classifiers = [
 ]
 dependencies = [
     "beautifulsoup4",
-    "pymupdf",
+    "pypdf>=6.16.1,<7",
     "requests",
 ]
+
+[project.urls]
+Documentation = "https://ipolharvard.github.io/cms-icd/"
+Issues = "https://github.com/ipolharvard/cms-icd/issues"
+Repository = "https://github.com/ipolharvard/cms-icd"
 
 [project.optional-dependencies]
 dev = ["pre-commit", "pytest"]

@@ -5,6 +5,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
+from conftest import guideline_fingerprint
 
 from cms_icd import ICD10KnowledgeBase
 
@@ -27,6 +28,13 @@ EXPECTED_SHA256 = {
     ("fy2025", "2025-04-01", "pcs", "tabular"): (
         "515198d2fc5caff19d6e29b68a276174157c9e53a486c1a0bdf239f1ecb1f2cd"
     ),
+}
+
+EXPECTED_GUIDELINE_FINGERPRINTS = {
+    (2019, "cm"): "933c07214242df3fffa1fcc94588a161d9708b74e47c35db9553e776e6142d38",
+    (2019, "pcs"): "681a7ac9511cf060ba40957513143ec403b9e3e5148993c9cecd21ea1b92914f",
+    (2026, "cm"): "58793aeb92d51ebea48da1151d2e2fa6670a8e80eedd7d1734c2f779d1fd654b",
+    (2026, "pcs"): "d9a30d9cde9c40d0f69252a88817113b5ef64f6ca7e6392047f0a49c2fbee701",
 }
 
 
@@ -77,6 +85,14 @@ def test_fy2019_direct_and_zipped_guidelines_parse(
 
     assert len(kb.cm.guidelines) > 10
     assert len(kb.pcs.guidelines["document"].content) > 10_000
+    assert (
+        guideline_fingerprint(kb.cm.guidelines)
+        == (EXPECTED_GUIDELINE_FINGERPRINTS[2019, "cm"])
+    )
+    assert (
+        guideline_fingerprint(kb.pcs.guidelines)
+        == (EXPECTED_GUIDELINE_FINGERPRINTS[2019, "pcs"])
+    )
 
 
 @pytest.mark.live_cms
@@ -178,6 +194,14 @@ def test_april_snapshot_inherits_and_replaces_materials_per_system(
 
     assert len(april.cm.guidelines) > 10
     assert len(april.pcs.guidelines["document"].content) > 10_000
+    assert (
+        guideline_fingerprint(april.cm.guidelines)
+        == (EXPECTED_GUIDELINE_FINGERPRINTS[2026, "cm"])
+    )
+    assert (
+        guideline_fingerprint(april.pcs.guidelines)
+        == (EXPECTED_GUIDELINE_FINGERPRINTS[2026, "pcs"])
+    )
     cm_manifest = json.loads(
         (
             historical_cache
