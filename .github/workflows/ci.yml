@@ -45,6 +45,8 @@ jobs:
       - name: Install and inspect wheel
         run: |
           wheel="$(find dist -name '*.whl' -print -quit)"
+          sdist="$(find dist -name '*.tar.gz' -print -quit)"
+          python scripts/check_sdist.py "$sdist"
           uv venv .package-venv
           uv pip install --python .package-venv/bin/python "$wheel"
           .package-venv/bin/python scripts/check_wheel.py "$wheel"

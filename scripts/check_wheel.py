@@ -15,8 +15,9 @@ def main() -> None:
     with ZipFile(wheel) as archive:
         names = set(archive.namelist())
 
-    if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
-        raise SystemExit(f"Wheel {wheel.name} does not contain LICENSE")
+    for filename in ("LICENSE", "NOTICE"):
+        if not any(name.endswith(f".dist-info/licenses/{filename}") for name in names):
+            raise SystemExit(f"Wheel {wheel.name} does not contain {filename}")
     if "cms_icd/__init__.py" not in names:
         raise SystemExit(f"Wheel {wheel.name} does not contain cms_icd")
     if not cms_icd.__all__:

@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: cms-icd
+message: >-
+  If you use this software in research or published work, please cite cms-icd
+  and acknowledge IPOL at MGH.
+type: software
+authors:
+  - given-names: Pawel
+    family-names: Renc
+    affiliation: IPOL at MGH
+version: 0.1.0
+license: Apache-2.0
+repository-code: https://github.com/ipolharvard/cms-icd
+url: https://ipolharvard.github.io/cms-icd/
+abstract: >-
+  Version-aware structured access to official CMS ICD-10-CM, ICD-10-PCS, and
+  General Equivalence Mapping materials.
+keywords:
+  - CMS
+  - ICD-10-CM
+  - ICD-10-PCS
+  - clinical informatics

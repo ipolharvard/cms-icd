@@ -51,3 +51,10 @@ CMS does not always retain every historical intra-year revision. Exact
 release selection is strict unless the caller explicitly enables a
 fiscal-year fallback.
 ```
+
+## Citation
+
+If you use `cms-icd` in research or published work, cite the software using
+the repository's `CITATION.cff` metadata and acknowledge IPOL at MGH. The
+software is distributed under Apache-2.0; its `NOTICE` records the IPOL
+attribution that accompanies redistributed copies.

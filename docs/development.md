@@ -52,14 +52,21 @@ set to **GitHub Actions**.
 ## Publishing releases
 
 Production releases use PyPI Trusted Publishing; no API token is stored in
-GitHub. One-time setup requires:
+GitHub. Complete this one-time setup before the first release:
 
-1. Add the `cms-icd` project to the IPOL organization on PyPI.
-2. Create a protected GitHub environment named `pypi` with required reviewers.
-3. Register a GitHub publisher for owner `ipolharvard`, repository `cms-icd`,
-   workflow `publish.yml`, and environment `pypi` in the PyPI project settings.
+1. Create a protected GitHub environment named `pypi` with required reviewers.
+2. In the PyPI account's **Publishing** settings, register a pending publisher
+   with project `cms-icd`, owner `ipolharvard`, repository `cms-icd`, workflow
+   `publish.yml`, and environment `pypi`. The first successful publication
+   creates the PyPI project; the pending publisher does not reserve its name.
+3. Connect the maintainer's GitHub account to Zenodo, synchronize repositories,
+   and enable `ipolharvard/cms-icd`. Zenodo then archives each GitHub release
+   and assigns its DOI.
 
-Set the package version in `pyproject.toml`, merge the validated change to
-`main`, and publish a GitHub Release whose tag is exactly `v<version>`. The
-workflow builds and validates the distributions in a job without publishing
-credentials, then passes only those artifacts to the protected publishing job.
+For each release, set the same version in `pyproject.toml` and `CITATION.cff`,
+merge the validated change to `main`, and publish a GitHub Release whose tag is
+exactly `v<version>`. The workflow builds and validates the distributions in a
+job without publishing credentials, then passes only those artifacts to the
+protected publishing job. In parallel, Zenodo archives the tagged source. After
+Zenodo assigns the first DOI, add it to `CITATION.cff`, the README, and the
+documentation for subsequent releases.

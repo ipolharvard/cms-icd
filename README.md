@@ -4,7 +4,7 @@
 [![Documentation](https://github.com/ipolharvard/cms-icd/actions/workflows/docs.yml/badge.svg)](https://ipolharvard.github.io/cms-icd/)
 [![CMS catalog](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](https://github.com/ipolharvard/cms-icd/blob/main/LICENSE)
 
 `cms-icd` provides version-aware, structured access to official CMS ICD-10-CM
 and ICD-10-PCS materials. Downloads and parsing are lazy: using diagnosis codes
@@ -137,6 +137,18 @@ Small custom or synthetic stores can be supplied directly:
 ['I10']
 
 ```
+
+## Citation and acknowledgment
+
+If you use `cms-icd` in research or published work, please cite the software
+using
+[`CITATION.cff`](https://github.com/ipolharvard/cms-icd/blob/main/CITATION.cff)
+and acknowledge IPOL at MGH.
+
+The source code is licensed under the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). See
+[`NOTICE`](https://github.com/ipolharvard/cms-icd/blob/main/NOTICE) for
+attribution information.
 
 ## Development
 
