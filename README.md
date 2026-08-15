@@ -1,144 +1,142 @@
 # CMS ICD
 
 [![PyPI](https://img.shields.io/pypi/v/cms-icd.svg)](https://pypi.org/project/cms-icd/)
-[![Python versions](https://img.shields.io/pypi/pyversions/cms-icd.svg)](https://pypi.org/project/cms-icd/)
 [![CI](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://ipolharvard.github.io/cms-icd/)
 [![CMS source](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml)
 [![License](https://img.shields.io/pypi/l/cms-icd.svg)](https://github.com/ipolharvard/cms-icd/blob/main/LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21952934.svg)](https://doi.org/10.5281/zenodo.21952934)
 
-`cms-icd` provides version-aware, structured access to official CMS ICD-10-CM
-and ICD-10-PCS materials. Downloads and parsing are lazy: using diagnosis codes
-does not download PCS files, and reading a tabular list does not parse indexes
-or guideline PDFs.
+`cms-icd` makes official CMS ICD-10 materials easy to use from Python. Look up
+ICD-10-CM diagnoses and ICD-10-PCS procedures, browse their hierarchies and
+indexes, read coding guidelines, and work with ICD-9/ICD-10 General Equivalence
+Mappings (GEMs).
 
-Python 3.12 or newer is required. The package is tested on Python 3.12–3.14.
-CMS-backed discovery supports production ICD-10 releases from FY 2016 onward,
-including advertised intra-year updates.
+Choose data by service date or by an exact CMS release. Files are downloaded
+from CMS only when needed and cached for later use.
 
-Full documentation is available at
-[ipolharvard.github.io/cms-icd](https://ipolharvard.github.io/cms-icd/).
+## Install
 
-The package also exposes the official ICD-9/ICD-10 General Equivalence Mappings
-without imposing an application-specific target-selection policy:
-
-```python
-from cms_icd import GEMKnowledgeBase
-
-gems = GEMKnowledgeBase.from_cms(fiscal_year=2018)
-entries = gems.cm.icd9_to_icd10["4280"]
-```
-
-Use a retrospectively corrected view when historical target-code validity must be
-preserved while later correction-only GEM revisions are incorporated:
-
-```python
-gems = GEMKnowledgeBase.corrected_from_cms(
-    fiscal_year=2016,
-)
-mapping = gems.cm.icd9_to_icd10.mapping("27906")
-provenance = gems.cm.icd9_to_icd10.provenance("27906")
-```
-
-The same exact and retrospectively corrected views apply to procedure GEMs through
-`gems.pcs`. The package also exports the stable ordered `ICD10_PCS_CHARACTERS` alphabet
-for consumers that need a complete, fold-independent PCS vocabulary.
-
-The correction horizon defaults to FY2018, the final CMS GEM release, and can be
-overridden explicitly for a narrower audit. A source stops accepting later revisions
-when its mapping encounters an introduced or retired source/target code.
-
-## Installation
-
-Install the published package with `uv`:
+With `uv`:
 
 ```bash
 uv add cms-icd
 ```
 
-For development, install an editable checkout:
+Or with `pip`:
 
 ```bash
-uv pip install -e /path/to/cms-icd
+pip install cms-icd
 ```
 
-## Choosing a release
+## Look up ICD-10 codes
 
-Select the release using the date that controls coding:
+Use the date that controls coding for the encounter:
 
 ```python
 from datetime import date
 
 from cms_icd import ICD10KnowledgeBase
 
-icd = ICD10KnowledgeBase.for_date(
-    date(2026, 5, 1),
-    cache_dir="data/cms_icd",
-)
-cm = icd.cm
-code = cm["I10"]  # downloads and parses CM tabular material on first use
+icd = ICD10KnowledgeBase.for_date(date(2026, 5, 1))
+
+diagnosis = icd.cm["I10"]
+print(diagnosis.description)
 ```
 
-Use the discharge date for inpatient ICD-10-CM and ICD-10-PCS, and the encounter
-or date of service for other ICD-10-CM coding.
+Use the discharge date for inpatient ICD-10-CM and ICD-10-PCS. For other
+ICD-10-CM use cases, use the encounter or service date.
 
-For reproducible research, select an exact effective snapshot:
+The knowledge base provides separate views for:
+
+- `icd.cm`: ICD-10-CM codes, hierarchy, index, and guidelines;
+- `icd.pcs`: ICD-10-PCS codes, hierarchy, index, and guidelines.
+
+See the [documentation](https://ipolharvard.github.io/cms-icd/) for code
+navigation, index lookup, and guideline access.
+
+## Choose an exact release
+
+Use `from_cms()` when you need a specific CMS fiscal-year revision:
 
 ```python
+from datetime import date
+
+from cms_icd import ICD10KnowledgeBase
+
 icd = ICD10KnowledgeBase.from_cms(
     fiscal_year=2026,
     release_date=date(2026, 4, 1),
-    cache_dir="data/cms_icd",
 )
 ```
 
-CMS commonly publishes an October release and an April 1 update. Materials not
-changed in an update are inherited from the latest earlier revision in that
-fiscal year. CMS does not always retain every historical revision, so snapshot
-selection is strict by default. Pass `fallback="latest_for_fy"` only when using
-the latest available fiscal-year material is scientifically acceptable.
+CMS commonly starts a fiscal year with an October release and may publish an
+April update. If a material did not change in the update, `cms-icd` uses the
+most recent earlier material from the same fiscal year.
 
-The [release guide](https://ipolharvard.github.io/cms-icd/guide/releases-and-caching/)
-documents supported guideline years and the exact October/April selection
-rules.
+Release selection is strict by default. The
+[release guide](https://ipolharvard.github.io/cms-icd/guide/releases-and-caching/)
+explains available years, midyear updates, and explicit fallback behavior.
 
-## Offline and custom stores
+## Use General Equivalence Mappings
 
-An existing directory is not inspected until a material is requested:
+Access the official GEM rows and flags without losing alternatives or
+combination mappings:
 
-```pycon
->>> from datetime import date
->>> from pathlib import Path
->>> from tempfile import TemporaryDirectory
->>> from cms_icd import ICD10KnowledgeBase
->>> with TemporaryDirectory() as directory:
-...     kb = ICD10KnowledgeBase.from_directory(
-...         directory,
-...         fiscal_year=2026,
-...         release_date=date(2025, 10, 1),
-...     )
-...     repr(kb)
-'ICD10KnowledgeBase(release=Release(fiscal_year=2026, release_date=datetime.date(2025, 10, 1)), loaded=[])'
+```python
+from cms_icd import GEMKnowledgeBase
 
+gems = GEMKnowledgeBase.from_cms(fiscal_year=2018)
+entries = gems.cm.icd9_to_icd10["4280"]
+mapping = gems.cm.icd9_to_icd10.mapping("4280")
 ```
 
-Small custom or synthetic stores can be supplied directly:
+Diagnosis mappings are available through `gems.cm`, and procedure mappings
+through `gems.pcs`. Each provides both ICD-9-to-ICD-10 and ICD-10-to-ICD-9
+directions.
 
-```pycon
->>> from cms_icd import Code, ICD10CMKnowledgeBase
->>> from cms_icd.models import Node
->>> from cms_icd.stores import TabularStore
->>> root = Node("cm", "cm", children_ids=("I10",))
->>> code = Code("I10", "I10", "Essential hypertension", parent_id="cm")
->>> tabular = TabularStore({"cm": root, "I10": code}, {"I10": "I10"}, ("cm",))
->>> cm = ICD10CMKnowledgeBase.from_stores(tabular=tabular)
->>> cm["I10"].description
-'Essential hypertension'
->>> cm.get_leaves("cm")
-['I10']
+For historical GEMs with later CMS corrections, use:
 
+```python
+gems = GEMKnowledgeBase.corrected_from_cms(fiscal_year=2016)
 ```
+
+The library returns the official mapping structure and does not choose a
+preferred target for you. See the
+[GEM guide](https://ipolharvard.github.io/cms-icd/guide/general-equivalence-mappings/)
+for alternatives, combinations, flags, and correction history.
+
+## Configure caching and offline access
+
+By default, downloaded CMS files are stored in the platform cache directory.
+Provide `cache_dir` to use a project, scratch, or shared location:
+
+```python
+from datetime import date
+from pathlib import Path
+
+from cms_icd import ICD10KnowledgeBase
+
+icd = ICD10KnowledgeBase.for_date(
+    date(2026, 5, 1),
+    cache_dir=Path("/shared/cache/cms_icd"),
+)
+```
+
+After the selected files have been cached, set `offline=True` to prevent
+network access:
+
+```python
+icd = ICD10KnowledgeBase.for_date(
+    date(2026, 5, 1),
+    cache_dir="/shared/cache/cms_icd",
+    offline=True,
+)
+```
+
+Use `ICD10KnowledgeBase.from_directory()` or
+`GEMKnowledgeBase.from_directory()` when you already manage the original CMS
+files yourself.
 
 ## Citation and acknowledgment
 
@@ -146,6 +144,7 @@ If you use `cms-icd` in research or published work, please cite the software
 using
 [`CITATION.cff`](https://github.com/ipolharvard/cms-icd/blob/main/CITATION.cff)
 and acknowledge IPOL at MGH.
+
 The version-independent project DOI is
 [`10.5281/zenodo.21952934`](https://doi.org/10.5281/zenodo.21952934).
 
@@ -163,12 +162,9 @@ make install-docs
 make docs
 ```
 
-Normal tests are offline. `make test-live` accesses CMS and must be run only
-when live integration testing is explicitly intended.
-
-CMS compatibility is validated in separate catalog, fresh-current, historical,
-and manual exhaustive lanes. See the
-[testing strategy](https://ipolharvard.github.io/cms-icd/testing/).
+See the [development guide](https://ipolharvard.github.io/cms-icd/development/)
+and [testing guide](https://ipolharvard.github.io/cms-icd/testing/) for the
+available checks and CMS integration tests.
 
 `cms-icd` is an independent open-source project. It is not affiliated with,
 endorsed by, or sponsored by the Centers for Medicare & Medicaid Services.

@@ -1,7 +1,5 @@
 # Repository Instructions
 
-These instructions apply to work in this repository.
-
 ## Python Commands
 
 Use the repository virtual environment at `.venv` for Python checks and tests.
