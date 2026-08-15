@@ -45,9 +45,11 @@ Each `GEMEntry` contains:
 - `approximate`, `no_map`, and `combination` boolean flags;
 - numeric `scenario` and `choice_list` identifiers.
 
-When CMS uses `NoDx` or `NoPCS`, `target` is `None` and `no_map` is true. Multiple
-entries for a source are returned as an immutable tuple in deterministic
-scenario/choice/target order.
+When CMS uses `NoDx` in CM files, `NoPCS` in forward PCS files, or `NoI9` in reverse PCS
+files, `target` is `None` and `no_map` is true. Multiple entries for a source are returned
+as an immutable tuple in deterministic scenario/choice/target order. A few official
+reverse PCS releases omit the no-map flag on `NoI9` rows; the parser treats the sentinel
+as authoritative and normalizes those rows to `no_map=True`.
 
 ## Reproducible and offline use
 
@@ -86,6 +88,18 @@ store = corrected.cm.icd9_to_icd10
 entries = store["27906"]
 lineage = store.provenance("27906")
 ```
+
+Procedure mappings use the same release selection and provenance contract:
+
+```python
+pcs_store = corrected.pcs.icd9_to_icd10
+pcs_mapping = pcs_store.mapping("0001")
+pcs_lineage = pcs_store.provenance("0001")
+```
+
+`ICD10_PCS_CHARACTERS` exposes the ordered, release-stable PCS alphabet for consumers
+that represent the seven code axes independently. It excludes the ambiguous letters
+`I` and `O`.
 
 The algorithm compares consecutive official releases and their opposite-direction code
 universes. It stops a source at the first transition involving an introduced or retired

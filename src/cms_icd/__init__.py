@@ -4,6 +4,7 @@ The package separates release acquisition from parsing and keeps CM and PCS mate
 independently lazy.
 """
 
+from .constants import ICD10_PCS_CHARACTERS
 from .exceptions import (
     AmbiguousReleaseError,
     DownloadError,
@@ -34,6 +35,7 @@ from .models import (
 from .stores import GEMStore
 
 __all__ = [
+    "ICD10_PCS_CHARACTERS",
     "AmbiguousReleaseError",
     "Code",
     "DownloadError",

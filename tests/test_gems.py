@@ -5,7 +5,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cms_icd import GEMDirection, GEMEntry, GEMKnowledgeBase, GEMStore
+from cms_icd import (
+    ICD10_PCS_CHARACTERS,
+    GEMDirection,
+    GEMEntry,
+    GEMKnowledgeBase,
+    GEMStore,
+)
 from cms_icd.exceptions import ParseError
 from cms_icd.gems import _backport_corrections
 from cms_icd.models import Node, Release
@@ -22,7 +28,7 @@ def _write_gems(directory: Path) -> None:
         encoding="ascii",
     )
     (directory / "2018_I10gem.txt").write_text(
-        "A000 0010 10000\n",
+        "A000 0010 10000\nA001 NoDx 11000\n",
         encoding="ascii",
     )
     (directory / "gem_i9pcs.txt").write_text(
@@ -65,7 +71,22 @@ def test_gem_knowledge_base_loads_systems_and_directions_lazily(
     assert repr(gems).endswith("loaded=[])")
     assert gems.cm.icd9_to_icd10["0010"][0].target == "A000"
     assert "icd9_to_icd10" in repr(gems.cm)
+    assert gems.cm.icd10_to_icd9["A001"][0].target is None
     assert gems.pcs.icd10_to_icd9["0ABC0ZZ"][0].target == "0010"
+
+
+def test_parse_reverse_pcs_no_map_uses_icd9_sentinel(tmp_path: Path) -> None:
+    path = tmp_path / "gem_pcsi9.txt"
+    path.write_text("0ABC0ZZ NoI9 10000\n", encoding="ascii")
+
+    store = parse_gems(
+        (path,),
+        system="pcs",
+        direction=GEMDirection.ICD10_TO_ICD9,
+    )
+
+    assert store["0ABC0ZZ"][0].target is None
+    assert store["0ABC0ZZ"][0].no_map is True
 
 
 def test_corrected_gems_default_to_last_cms_release() -> None:
@@ -102,10 +123,15 @@ def test_store_groups_simple_and_combination_entries() -> None:
     assert store.provenance("0010").selected_mapping_release.fiscal_year == 2018
 
 
-def _store(year: int, values: dict[str, tuple[GEMEntry, ...]]) -> GEMStore:
+def _store(
+    year: int,
+    values: dict[str, tuple[GEMEntry, ...]],
+    *,
+    system: str = "cm",
+) -> GEMStore:
     return GEMStore(
         values,
-        system="cm",
+        system=system,
         direction=GEMDirection.ICD9_TO_ICD10,
         release=Release(year, date(year - 1, 10, 1)),
     )
@@ -182,6 +208,26 @@ def test_retrospective_corrections_do_not_resume_after_mixed_change() -> None:
 
     assert [entry.target for entry in corrected["0010"]] == ["A100"]
     assert corrected.provenance("0010").selected_mapping_release.fiscal_year == 2016
+
+
+def test_retrospective_corrections_preserve_pcs_store_metadata() -> None:
+    stores = [
+        _store(2017, {"0010": (_mapped("0010", "0ABC0ZZ"),)}, system="pcs"),
+        _store(2018, {"0010": (_mapped("0010", "0ABC3ZZ"),)}, system="pcs"),
+    ]
+
+    corrected = _backport_corrections(
+        stores,
+        [{"0ABC0ZZ", "0ABC3ZZ"}, {"0ABC0ZZ", "0ABC3ZZ"}],
+    )
+
+    assert corrected.system == "pcs"
+    assert corrected["0010"][0].target == "0ABC3ZZ"
+    assert corrected.provenance("0010").selected_mapping_release.fiscal_year == 2018
+
+
+def test_pcs_character_alphabet_is_ordered_and_omits_ambiguous_letters() -> None:
+    assert "".join(ICD10_PCS_CHARACTERS) == "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 
 def test_tabular_store_returns_lowest_common_ancestor() -> None:

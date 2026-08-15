@@ -72,17 +72,29 @@ def parse_gems(
         if len(fields) != 3 or not re.fullmatch(r"[01]{3}\d{2}", fields[-1]):
             raise ParseError(f"Invalid GEM record at {path}:{line_number}")
         source, raw_target, flags = fields
-        approximate, no_map, combination = (flag == "1" for flag in flags[:3])
-        target = None if no_map else raw_target
-        if no_map and raw_target.lower() not in {"nodx", "nopcs"}:
+        approximate, no_map_flag, combination = (flag == "1" for flag in flags[:3])
+        no_map_sentinel = (
+            "noi9"
+            if system == "pcs" and direction is GEMDirection.ICD10_TO_ICD9
+            else ("nodx" if system == "cm" else "nopcs")
+        )
+        raw_target_lower = raw_target.lower()
+        is_sentinel = raw_target_lower in {"nodx", "noi9", "nopcs"}
+        if no_map_flag and raw_target_lower != no_map_sentinel:
             raise ParseError(
                 f"GEM no-map record has an unexpected target at {path}:{line_number}"
             )
-        if not no_map and raw_target.lower() in {"nodx", "nopcs"}:
+        if is_sentinel and raw_target_lower != no_map_sentinel:
+            raise ParseError(f"Unexpected GEM target sentinel at {path}:{line_number}")
+        if is_sentinel and not no_map_flag and no_map_sentinel != "noi9":
             raise ParseError(
                 "GEM target sentinel is missing its no-map flag at "
                 f"{path}:{line_number}"
             )
+        # Some official reverse PCS releases encode NoI9 with 10000 rather than
+        # setting the documented no-map bit. The sentinel is authoritative.
+        no_map = no_map_flag or is_sentinel
+        target = None if no_map else raw_target
         entry = GEMEntry(
             source=source,
             target=target,

@@ -39,6 +39,10 @@ mapping = gems.cm.icd9_to_icd10.mapping("27906")
 provenance = gems.cm.icd9_to_icd10.provenance("27906")
 ```
 
+The same exact and retrospectively corrected views apply to procedure GEMs through
+`gems.pcs`. The package also exports the stable ordered `ICD10_PCS_CHARACTERS` alphabet
+for consumers that need a complete, fold-independent PCS vocabulary.
+
 The correction horizon defaults to FY2018, the final CMS GEM release, and can be
 overridden explicitly for a narrower audit. A source stops accepting later revisions
 when its mapping encounters an introduced or retired source/target code.
