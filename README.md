@@ -28,6 +28,21 @@ gems = GEMKnowledgeBase.from_cms(fiscal_year=2018)
 entries = gems.cm.icd9_to_icd10["4280"]
 ```
 
+Use a retrospectively corrected view when historical target-code validity must be
+preserved while later correction-only GEM revisions are incorporated:
+
+```python
+gems = GEMKnowledgeBase.corrected_from_cms(
+    fiscal_year=2016,
+)
+mapping = gems.cm.icd9_to_icd10.mapping("27906")
+provenance = gems.cm.icd9_to_icd10.provenance("27906")
+```
+
+The correction horizon defaults to FY2018, the final CMS GEM release, and can be
+overridden explicitly for a narrower audit. A source stops accepting later revisions
+when its mapping encounters an introduced or retired source/target code.
+
 ## Installation
 
 Install an internal Git checkout with `uv`:

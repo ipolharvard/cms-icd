@@ -70,6 +70,24 @@ GEM_CATALOG_HTML = """
 </body></html>
 """
 
+LEGACY_TABLE_CATALOG_HTML = """
+<html><body>
+  <h3>ICD-10 Files</h3>
+  <ul>
+    <li><a href="/files/zip/2014-icd10-code-tables-and-index.zip">
+      2014 Code Tables and Index (ZIP)
+    </a></li>
+    <li>2014 ICD-10-CM Present On Admission Exempt List</li>
+  </ul>
+  <ul>
+    <li><a href="/files/zip/2014-code-tables-and-index.zip">
+      2014 Code Tables and Index (ZIP)
+    </a></li>
+    <li>2014 Official ICD-10-PCS Coding Guidelines</li>
+  </ul>
+</body></html>
+"""
+
 
 def test_parse_catalog_distinguishes_initial_and_april_revisions() -> None:
     entries = parse_catalog(CATALOG_HTML)
@@ -110,6 +128,17 @@ def test_parse_catalog_discovers_cm_and_pcs_gems_from_section_context() -> None:
         ("pcs", "gems", 2018),
         ("cm", "gems", 2016),
         ("pcs", "gems", 2016),
+    ]
+
+
+def test_parse_catalog_uses_section_for_ambiguous_legacy_table_labels() -> None:
+    entries = parse_catalog(LEGACY_TABLE_CATALOG_HTML)
+
+    assert [(entry.system, entry.material) for entry in entries] == [
+        ("cm", "tabular"),
+        ("cm", "index"),
+        ("pcs", "tabular"),
+        ("pcs", "index"),
     ]
 
 
@@ -232,6 +261,17 @@ def _cm_archive() -> bytes:
     return buffer.getvalue()
 
 
+def _legacy_cm_archive() -> bytes:
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("Tabular.xml", "<ICD10CM.tabular/>")
+        archive.writestr("Index.xml", "<ICD10CM.index/>")
+        archive.writestr("Neoplasm.xml", "<ICD10CM.index/>")
+        archive.writestr("E-Index.xml", "<ICD10CM.index/>")
+        archive.writestr("Drug.xml", "<ICD10CM.index/>")
+    return buffer.getvalue()
+
+
 def test_one_archive_download_supplies_tabular_and_index(tmp_path: Path) -> None:
     session = FakeSession(_cm_archive())
     provider = CMSProvider(
@@ -254,6 +294,23 @@ def test_one_archive_download_supplies_tabular_and_index(tmp_path: Path) -> None
     assert manifest["release_date"] == "2025-10-01"
     assert len(manifest["sha256"]) == 64
     assert set(manifest["file_sha256"]) == {"icd10cm_tabular_2026.xml"}
+
+
+def test_legacy_archive_names_supply_tabular_and_index(tmp_path: Path) -> None:
+    session = FakeSession(_legacy_cm_archive())
+    provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert [path.name for path in provider.paths("cm", "tabular")] == ["Tabular.xml"]
+    assert {path.name for path in provider.paths("cm", "index")} == {
+        "Drug.xml",
+        "E-Index.xml",
+        "Index.xml",
+        "Neoplasm.xml",
+    }
 
 
 def test_corrupt_extracted_file_is_rebuilt_from_cached_artifact(

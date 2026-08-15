@@ -7,7 +7,19 @@ from collections.abc import Iterable, Iterator, Mapping
 from types import MappingProxyType
 from typing import TypeVar
 
-from .models import Code, GEMDirection, GEMEntry, Guideline, Node, Release, Term
+from .models import (
+    Code,
+    GEMChoiceList,
+    GEMDirection,
+    GEMEntry,
+    GEMMapping,
+    GEMProvenance,
+    GEMScenario,
+    Guideline,
+    Node,
+    Release,
+    Term,
+)
 
 T = TypeVar("T")
 
@@ -51,6 +63,7 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
         system: str,
         direction: GEMDirection,
         release: Release | None = None,
+        provenance: Mapping[str, GEMProvenance] | None = None,
     ) -> None:
         ordered = {
             source: tuple(
@@ -69,6 +82,53 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
         self.system = system
         self.direction = direction
         self.release = release
+        self._provenance = MappingProxyType(dict(provenance or {}))
+
+    def mapping(self, source: str) -> GEMMapping:
+        """Return one source's rows grouped into alternatives and scenarios."""
+        entries = self[source]
+        simple = tuple(
+            entry
+            for entry in entries
+            if not entry.combination and entry.target is not None
+        )
+        grouped: dict[int, dict[int, list[GEMEntry]]] = {}
+        for entry in entries:
+            if not entry.combination or entry.target is None:
+                continue
+            grouped.setdefault(entry.scenario, {}).setdefault(
+                entry.choice_list, []
+            ).append(entry)
+        scenarios = tuple(
+            GEMScenario(
+                number=scenario,
+                choice_lists=tuple(
+                    GEMChoiceList(number=choice, alternatives=tuple(alternatives))
+                    for choice, alternatives in sorted(choice_lists.items())
+                ),
+            )
+            for scenario, choice_lists in sorted(grouped.items())
+        )
+        return GEMMapping(
+            source=source,
+            simple_alternatives=simple,
+            scenarios=scenarios,
+            no_map=any(entry.no_map for entry in entries),
+        )
+
+    def provenance(self, source: str) -> GEMProvenance:
+        """Return release provenance for one source mapping."""
+        if source not in self:
+            raise KeyError(source)
+        if source in self._provenance:
+            return self._provenance[source]
+        if self.release is None:
+            raise RuntimeError("GEM provenance requires release metadata")
+        return GEMProvenance(
+            vocabulary_release=self.release,
+            selected_mapping_release=self.release,
+            reviewed_through_release=self.release,
+        )
 
 
 class TabularStore(ReadOnlyStore[Node]):
@@ -95,7 +155,17 @@ class TabularStore(ReadOnlyStore[Node]):
     ) -> None:
         super().__init__(values)
         self._code_lookup = MappingProxyType(dict(code_lookup))
+        self._normalized_code_lookup = MappingProxyType(
+            {code.replace(".", ""): node_id for code, node_id in code_lookup.items()}
+        )
         self._roots = tuple(roots)
+
+    def _node_id(self, code_or_id: str) -> str:
+        if code_or_id in self._code_lookup:
+            return self._code_lookup[code_or_id]
+        if code_or_id in self:
+            return code_or_id
+        return self._normalized_code_lookup[code_or_id.replace(".", "")]
 
     @property
     def lookup(self) -> Mapping[str, str]:
@@ -108,12 +178,12 @@ class TabularStore(ReadOnlyStore[Node]):
         return self._roots
 
     def by_code(self, code: str) -> Node:
-        """Return the node for an ICD code."""
-        return self[self.lookup[code]]
+        """Return the node for a dotted or compact ICD code."""
+        return self[self._node_id(code)]
 
     def parents(self, code_or_id: str) -> tuple[Node, ...]:
         """Return parents from the immediate parent to the root."""
-        node_id = self.lookup.get(code_or_id, code_or_id)
+        node_id = self._node_id(code_or_id)
         node = self[node_id]
         result: list[Node] = []
         while node.parent_id:
@@ -123,7 +193,7 @@ class TabularStore(ReadOnlyStore[Node]):
 
     def children(self, code_or_id: str) -> tuple[Node, ...]:
         """Return direct children of a node."""
-        node_id = self.lookup.get(code_or_id, code_or_id)
+        node_id = self._node_id(code_or_id)
         return tuple(self[child_id] for child_id in self[node_id].children_ids)
 
     def descendants(self, code_or_id: str) -> tuple[Node, ...]:
@@ -144,13 +214,30 @@ class TabularStore(ReadOnlyStore[Node]):
 
     def siblings(self, code_or_id: str) -> tuple[Node, ...]:
         """Return direct siblings, excluding the requested node."""
-        node_id = self.lookup.get(code_or_id, code_or_id)
+        node_id = self._node_id(code_or_id)
         node = self[node_id]
         if not node.parent_id:
             return ()
         return tuple(
             self[item] for item in self[node.parent_id].children_ids if item != node_id
         )
+
+    def lowest_common_ancestor(self, codes_or_ids: Iterable[str]) -> Node | None:
+        """Return the deepest hierarchy node shared by all supplied codes.
+
+        The requested nodes themselves participate in the comparison. An empty input has
+        no common ancestor; unknown codes retain the normal mapping ``KeyError``.
+        """
+        values = tuple(codes_or_ids)
+        if not values:
+            return None
+        paths: list[tuple[Node, ...]] = []
+        for value in values:
+            node_id = self._node_id(value)
+            node = self[node_id]
+            paths.append((node, *self.parents(node_id)))
+        shared = set.intersection(*({node.id for node in path} for path in paths))
+        return next((node for node in paths[0] if node.id in shared), None)
 
 
 class IndexStore(ReadOnlyStore[Term]):

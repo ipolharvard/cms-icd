@@ -19,6 +19,20 @@ for entry in entries:
     print(entry.target, entry.approximate, entry.scenario, entry.choice_list)
 ```
 
+For structured alternatives and combinations, request the grouped mapping:
+
+```python
+mapping = gems.cm.icd9_to_icd10.mapping("4280")
+for scenario in mapping.scenarios:
+    for choice_list in scenario.choice_lists:
+        print([entry.target for entry in choice_list.alternatives])
+```
+
+Simple alternatives are OR relationships. Scenarios are OR relationships, choice lists
+inside one scenario are AND relationships, and alternatives inside one choice list are
+OR relationships. A mapping may contain both simple and combination entries; the
+library exposes both and does not impose a resolution policy.
+
 Diagnosis mappings are available through `gems.cm`; procedure mappings are available
 through `gems.pcs`. Each view provides `icd9_to_icd10` and `icd10_to_icd9` stores. The
 requested system and direction are downloaded and parsed only when accessed.
@@ -56,3 +70,34 @@ filenames intact.
 
 GEMs are distinct from reimbursement mappings and other conversion tables. Catalog
 discovery excludes those artifacts.
+
+## Exact and retrospectively corrected history
+
+`from_cms()` returns the official rows for one fiscal year without modification.
+`corrected_from_cms()` retains that fiscal year's target-code vocabulary while adopting
+later correction-only complete row sets:
+
+```python
+corrected = GEMKnowledgeBase.corrected_from_cms(
+    fiscal_year=2016,
+    cache_dir="cache/cms_icd",
+)
+store = corrected.cm.icd9_to_icd10
+entries = store["27906"]
+lineage = store.provenance("27906")
+```
+
+The algorithm compares consecutive official releases and their opposite-direction code
+universes. It stops a source at the first transition involving an introduced or retired
+source/target code. Mixed lifecycle and correction changes are not partially applied,
+and processing does not resume for that source after the boundary. Consequently, every
+result is a complete row set copied from one official release rather than a filtered or
+synthetic cluster.
+
+The correction horizon defaults to FY2018, the final CMS GEM release. Pass
+`corrections_through_fiscal_year` only when a deliberately narrower review horizon is
+required.
+
+`GEMProvenance` records the historical vocabulary release, the release supplying the
+selected rows, the pinned review horizon, and the first lifecycle boundary when one was
+encountered. Missing intermediate releases remain errors; there is no silent fallback.

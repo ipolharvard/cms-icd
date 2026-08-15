@@ -84,6 +84,46 @@ class GEMEntry(Record):
 
 
 @dataclass(frozen=True, slots=True)
+class GEMChoiceList(Record):
+    """Alternative target rows occupying one required slot in a GEM scenario."""
+
+    number: int
+    alternatives: tuple[GEMEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GEMScenario(Record):
+    """One complete combination-mapping alternative."""
+
+    number: int
+    choice_lists: tuple[GEMChoiceList, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GEMMapping(Record):
+    """Structured interpretation of every official row for one source code.
+
+    Simple alternatives and combination scenarios may both be populated because a small
+    number of official GEM entries contain both forms.
+    """
+
+    source: str
+    simple_alternatives: tuple[GEMEntry, ...]
+    scenarios: tuple[GEMScenario, ...]
+    no_map: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class GEMProvenance(Record):
+    """Release lineage for an exact or retrospectively corrected source mapping."""
+
+    vocabulary_release: Release
+    selected_mapping_release: Release
+    reviewed_through_release: Release
+    blocked_by_code_lifecycle_release: Release | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Node(Record):
     """A node in an ICD tabular hierarchy."""
 

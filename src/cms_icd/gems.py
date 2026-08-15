@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
+from itertools import pairwise
 from threading import Lock
 from typing import TYPE_CHECKING, Self
 
-from .models import GEMDirection, Release
+from .models import GEMDirection, GEMProvenance, Release
 from .parsers import parse_gems
 from .sources import CMSProvider, DirectoryProvider, MaterialProvider
+from .stores import GEMStore
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from .stores import GEMStore
 
 
 class GEMSystemView:
@@ -26,10 +26,12 @@ class GEMSystemView:
         *,
         icd9_to_icd10: GEMStore | None = None,
         icd10_to_icd9: GEMStore | None = None,
+        correction_providers: tuple[MaterialProvider, ...] = (),
     ) -> None:
         if system not in {"cm", "pcs"}:
             raise ValueError(f"Unsupported GEM system: {system!r}")
         self._provider = provider
+        self._correction_providers = correction_providers
         self.system = system
         self._stores = {
             GEMDirection.ICD9_TO_ICD10: icd9_to_icd10,
@@ -68,14 +70,34 @@ class GEMSystemView:
                         raise RuntimeError(
                             f"{type(self).__name__} has no provider for unloaded GEMs"
                         )
-                    store = parse_gems(
-                        self._provider.paths(self.system, "gems"),
-                        system=self.system,
-                        direction=direction,
-                        release=self._provider.release,
-                    )
+                    store = self._load_provider(self._provider, direction)
+                    if self._correction_providers:
+                        stores = [store]
+                        target_universes = [
+                            set(
+                                self._load_provider(
+                                    self._provider, _opposite(direction)
+                                )
+                            )
+                        ]
+                        for provider in self._correction_providers:
+                            stores.append(self._load_provider(provider, direction))
+                            target_universes.append(
+                                set(self._load_provider(provider, _opposite(direction)))
+                            )
+                        store = _backport_corrections(stores, target_universes)
                     self._stores[direction] = store
         return store
+
+    def _load_provider(
+        self, provider: MaterialProvider, direction: GEMDirection
+    ) -> GEMStore:
+        return parse_gems(
+            provider.paths(self.system, "gems"),
+            system=self.system,
+            direction=direction,
+            release=provider.release,
+        )
 
     @property
     def icd9_to_icd10(self) -> GEMStore:
@@ -103,8 +125,14 @@ class GEMSystemView:
 class GEMKnowledgeBase:
     """A CMS fiscal-year GEM release with independently lazy CM and PCS views."""
 
-    def __init__(self, provider: MaterialProvider) -> None:
+    def __init__(
+        self,
+        provider: MaterialProvider,
+        *,
+        correction_providers: tuple[MaterialProvider, ...] = (),
+    ) -> None:
         self._provider = provider
+        self._correction_providers = correction_providers
         self._cm: GEMSystemView | None = None
         self._pcs: GEMSystemView | None = None
 
@@ -127,6 +155,42 @@ class GEMKnowledgeBase:
         )
 
     @classmethod
+    def corrected_from_cms(
+        cls,
+        fiscal_year: int,
+        *,
+        corrections_through_fiscal_year: int = 2018,
+        cache_dir: str | Path | None = None,
+        offline: bool = False,
+    ) -> Self:
+        """Create GEMs using historical vocabulary and later safe corrections.
+
+        Each source remains on the requested fiscal year's vocabulary. Later complete
+        row sets are adopted only until that source encounters an introduced or retired
+        source/target code. Corrections are reviewed through FY2018 by default, the last
+        CMS GEM release.
+        """
+        if corrections_through_fiscal_year < fiscal_year:
+            raise ValueError(
+                "corrections_through_fiscal_year must not precede fiscal_year"
+            )
+
+        def provider(year: int) -> CMSProvider:
+            return CMSProvider(
+                Release(year, date(year - 1, 10, 1)),
+                cache_dir=cache_dir,
+                offline=offline,
+            )
+
+        return cls(
+            provider(fiscal_year),
+            correction_providers=tuple(
+                provider(year)
+                for year in range(fiscal_year + 1, corrections_through_fiscal_year + 1)
+            ),
+        )
+
+    @classmethod
     def from_directory(
         cls,
         directory: str | Path,
@@ -146,14 +210,22 @@ class GEMKnowledgeBase:
     def cm(self) -> GEMSystemView:
         """Return the lazy diagnosis GEM view."""
         if self._cm is None:
-            self._cm = GEMSystemView(self._provider, "cm")
+            self._cm = GEMSystemView(
+                self._provider,
+                "cm",
+                correction_providers=self._correction_providers,
+            )
         return self._cm
 
     @property
     def pcs(self) -> GEMSystemView:
         """Return the lazy procedure GEM view."""
         if self._pcs is None:
-            self._pcs = GEMSystemView(self._provider, "pcs")
+            self._pcs = GEMSystemView(
+                self._provider,
+                "pcs",
+                correction_providers=self._correction_providers,
+            )
         return self._pcs
 
     def __repr__(self) -> str:
@@ -163,4 +235,81 @@ class GEMKnowledgeBase:
             for name, view in (("cm", self._cm), ("pcs", self._pcs))
             if view is not None
         ]
-        return f"GEMKnowledgeBase(release={self.release!r}, loaded={loaded!r})"
+        corrections_through = (
+            self._correction_providers[-1].release
+            if self._correction_providers
+            else None
+        )
+        return (
+            f"GEMKnowledgeBase(release={self.release!r}, "
+            f"corrections_through={corrections_through!r}, loaded={loaded!r})"
+        )
+
+
+def _opposite(direction: GEMDirection) -> GEMDirection:
+    if direction is GEMDirection.ICD9_TO_ICD10:
+        return GEMDirection.ICD10_TO_ICD9
+    return GEMDirection.ICD9_TO_ICD10
+
+
+def _targets(entries: tuple) -> set[str]:
+    return {entry.target for entry in entries if entry.target is not None}
+
+
+def _backport_corrections(
+    stores: list[GEMStore], target_universes: list[set[str]]
+) -> GEMStore:
+    """Backport correction-only row sets without crossing code lifecycle changes."""
+    if len(stores) != len(target_universes) or not stores:
+        raise ValueError("A target universe is required for every GEM store")
+    base = stores[0]
+    if base.release is None or any(store.release is None for store in stores):
+        raise ValueError("Retrospective correction requires release metadata")
+    base_targets = target_universes[0]
+    values = dict(base.items())
+    selected = dict.fromkeys(base, base.release)
+    blocked: dict[str, Release] = {}
+
+    for index, (old, new) in enumerate(pairwise(stores)):
+        old_universe = target_universes[index]
+        new_universe = target_universes[index + 1]
+        introduced = new_universe - old_universe
+        retired = old_universe - new_universe
+        for source in base:
+            if source in blocked:
+                continue
+            if source not in old or source not in new:
+                blocked[source] = new.release
+                continue
+            old_entries = old[source]
+            new_entries = new[source]
+            if old_entries == new_entries:
+                continue
+            old_targets = _targets(old_entries)
+            new_targets = _targets(new_entries)
+            lifecycle = bool((old_targets | new_targets) & (introduced | retired))
+            historically_compatible = new_targets <= base_targets
+            lineage_matches = values[source] == old_entries
+            if lifecycle or not historically_compatible or not lineage_matches:
+                blocked[source] = new.release
+                continue
+            values[source] = new_entries
+            selected[source] = new.release
+
+    reviewed = stores[-1].release
+    provenance = {
+        source: GEMProvenance(
+            vocabulary_release=base.release,
+            selected_mapping_release=selected[source],
+            reviewed_through_release=reviewed,
+            blocked_by_code_lifecycle_release=blocked.get(source),
+        )
+        for source in base
+    }
+    return GEMStore(
+        values,
+        system=base.system,
+        direction=base.direction,
+        release=base.release,
+        provenance=provenance,
+    )

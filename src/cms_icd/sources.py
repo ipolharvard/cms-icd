@@ -41,15 +41,19 @@ CMS_CATALOG_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes"
 CMS_ARCHIVE_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-10-cm-icd-10-pcs-gem-archive"
 
 _PATTERNS: dict[tuple[str, str], tuple[str, ...]] = {
-    ("cm", "tabular"): ("icd10cm_tabular*.xml",),
+    ("cm", "tabular"): ("icd10cm_tabular*.xml", "tabular.xml"),
     ("cm", "index"): (
         "*icd10cm_index*.xml",
         "*icd10cm_neoplasm*.xml",
         "*icd10cm_eindex*.xml",
         "*icd10cm_drug*.xml",
+        "index.xml",
+        "neoplasm.xml",
+        "e-index.xml",
+        "drug.xml",
     ),
     ("cm", "guidelines"): ("*cm*guidelines*.pdf",),
-    ("pcs", "tabular"): ("*icd10pcs_tables*.xml",),
+    ("pcs", "tabular"): ("*icd10pcs_tables*.xml", "*icd10pcs_tabular*.xml"),
     ("pcs", "index"): ("*icd10pcs_index*.xml",),
     ("pcs", "guidelines"): ("*pcs*guidelines*.pdf",),
     ("cm", "gems"): ("*i9gem*.txt", "*i10gem*.txt"),
@@ -94,18 +98,18 @@ def _infer_system(label: str, href: str, section: str = "") -> str | None:
     text = f"{label} {href}".lower()
     if "pcs" in text or "procedure code" in text:
         return "pcs"
-    if (
-        "cm" in text
-        or "diagnosis code" in text
-        or "code tables, tabular and index" in text
-        or "code tables and index" in text
-        or "coding guidelines" in text
-    ):
+    if "cm" in text or "diagnosis code" in text:
         return "cm"
     section_text = section.lower()
     if "pcs" in section_text or "procedure code" in section_text:
         return "pcs"
     if "cm" in section_text or "diagnosis code" in section_text:
+        return "cm"
+    if (
+        "code tables, tabular and index" in text
+        or "code tables and index" in text
+        or "coding guidelines" in text
+    ):
         return "cm"
     return None
 
@@ -155,8 +159,16 @@ def parse_catalog(
         label = " ".join(anchor.get_text(" ", strip=True).split())
         href = str(anchor["href"])
         heading = anchor.find_previous(["h1", "h2", "h3", "h4", "h5", "h6"])
-        section = heading.get_text(" ", strip=True) if heading is not None else ""
-        system = _infer_system(label, href, section)
+        container = anchor.find_parent(["ul", "ol", "table"])
+        context = " ".join(
+            text
+            for text in (
+                heading.get_text(" ", strip=True) if heading is not None else "",
+                container.get_text(" ", strip=True) if container is not None else "",
+            )
+            if text
+        )
+        system = _infer_system(label, href, context)
         material = _infer_material(label, href)
         fiscal_year = _infer_year(label, href)
         if system is None or material is None or fiscal_year is None:
