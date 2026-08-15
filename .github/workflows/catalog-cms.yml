@@ -1,4 +1,4 @@
-name: CMS catalog contract
+name: CMS source
 
 on:
   workflow_dispatch:

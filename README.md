@@ -1,10 +1,12 @@
 # CMS ICD
 
+[![PyPI](https://img.shields.io/pypi/v/cms-icd.svg)](https://pypi.org/project/cms-icd/)
+[![Python versions](https://img.shields.io/pypi/pyversions/cms-icd.svg)](https://pypi.org/project/cms-icd/)
 [![CI](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/ci.yml)
-[![Documentation](https://github.com/ipolharvard/cms-icd/actions/workflows/docs.yml/badge.svg)](https://ipolharvard.github.io/cms-icd/)
-[![CMS catalog](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](https://github.com/ipolharvard/cms-icd/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://ipolharvard.github.io/cms-icd/)
+[![CMS source](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml/badge.svg)](https://github.com/ipolharvard/cms-icd/actions/workflows/catalog-cms.yml)
+[![License](https://img.shields.io/pypi/l/cms-icd.svg)](https://github.com/ipolharvard/cms-icd/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21952934.svg)](https://doi.org/10.5281/zenodo.21952934)
 
 `cms-icd` provides version-aware, structured access to official CMS ICD-10-CM
 and ICD-10-PCS materials. Downloads and parsing are lazy: using diagnosis codes
@@ -144,6 +146,8 @@ If you use `cms-icd` in research or published work, please cite the software
 using
 [`CITATION.cff`](https://github.com/ipolharvard/cms-icd/blob/main/CITATION.cff)
 and acknowledge IPOL at MGH.
+The version-independent project DOI is
+[`10.5281/zenodo.21952934`](https://doi.org/10.5281/zenodo.21952934).
 
 The source code is licensed under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). See

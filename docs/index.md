@@ -58,3 +58,6 @@ If you use `cms-icd` in research or published work, cite the software using
 the repository's `CITATION.cff` metadata and acknowledge IPOL at MGH. The
 software is distributed under Apache-2.0; its `NOTICE` records the IPOL
 attribution that accompanies redistributed copies.
+
+The version-independent project DOI is
+[`10.5281/zenodo.21952934`](https://doi.org/10.5281/zenodo.21952934).

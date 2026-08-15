@@ -9,6 +9,7 @@ authors:
     family-names: Renc
     affiliation: IPOL at MGH
 version: 0.1.0
+doi: 10.5281/zenodo.21952934
 license: Apache-2.0
 repository-code: https://github.com/ipolharvard/cms-icd
 url: https://ipolharvard.github.io/cms-icd/
