@@ -193,6 +193,19 @@ when the block exits. `offline=True` has different semantics: it prohibits
 network access and requires the selected catalog and artifacts to exist in the
 chosen cache directory.
 
+The downloaded catalog is also persistent and is reused until explicitly
+refreshed. This keeps repeated pipelines from downloading and parsing CMS
+catalog HTML even when they do not set `offline=True`. Refresh it when newly
+advertised CMS releases should become visible:
+
+```python
+from cms_icd import refresh_cms_catalog
+
+refresh_cms_catalog(cache_dir="data/cms_icd")
+```
+
+Refreshing the catalog does not delete or redownload existing CMS artifacts.
+
 Downloaded artifacts are keyed by URL, checksummed with SHA-256, and reused when
 one CMS bundle supplies multiple lazy stores. Extraction uses a directory lock
 and an atomic staging rename so concurrent readers do not observe partial
@@ -202,3 +215,11 @@ Each extracted material directory contains `manifest.json` with the source URL,
 release metadata, artifact checksum, extracted filenames, and a checksum for
 each extracted file. Checksums are revalidated before reuse; corrupt or
 incomplete cache entries are rebuilt automatically.
+
+Parsed GEM stores, retrospectively corrected GEM stores, and ICD-10 tabular
+hierarchies are cached under a versioned `_derived` directory. Their compact
+JSON payloads are checksummed and keyed by source-file digests, release
+metadata, and parser or correction-policy versions. Final best-effort mapping
+resolutions are assembled from these reusable stores and retained only for the
+life of the Python process. Corrupt or incompatible derived entries are rebuilt
+from the validated source artifacts.

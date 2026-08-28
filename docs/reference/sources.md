@@ -14,3 +14,5 @@ points for applications that need a custom material source.
 ::: cms_icd.sources.CatalogEntry
 
 ::: cms_icd.sources.fiscal_year_for
+
+::: cms_icd.sources.refresh_cms_catalog

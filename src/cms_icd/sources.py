@@ -10,12 +10,14 @@ import re
 import shutil
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from fnmatch import fnmatch
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from threading import Lock
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 from zipfile import BadZipFile, ZipFile
@@ -41,6 +43,9 @@ CMS_CATALOG_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes"
 CMS_ARCHIVE_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-10-cm-icd-10-pcs-gem-archive"
 _PACKAGE_NAME = "cms-icd"
 _CACHE_SUBDIRECTORY = Path("ipolharvard") / _PACKAGE_NAME.replace("-", "_")
+
+_catalog_lock = Lock()
+_catalog_cache: dict[tuple[str, bool], Future[tuple[CatalogEntry, ...]]] = {}
 
 _PATTERNS: dict[tuple[str, str], tuple[str, ...]] = {
     ("cm", "tabular"): ("icd10cm_tabular*.xml", "tabular.xml"),
@@ -82,6 +87,129 @@ class CatalogEntry:
     label: str
     url: str
     page_url: str
+
+
+def _catalog_records(entries: tuple[CatalogEntry, ...]) -> list[dict[str, object]]:
+    return [
+        {
+            "system": entry.system,
+            "material": entry.material,
+            "fiscal_year": entry.fiscal_year,
+            "release_date": entry.release_date.isoformat(),
+            "label": entry.label,
+            "url": entry.url,
+            "page_url": entry.page_url,
+        }
+        for entry in entries
+    ]
+
+
+def _read_catalog(path: Path) -> tuple[CatalogEntry, ...] | None:
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+        return tuple(
+            CatalogEntry(
+                **{
+                    **record,
+                    "release_date": date.fromisoformat(record["release_date"]),
+                }
+            )
+            for record in records
+        )
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _fetch_catalog(session: requests.Session) -> tuple[CatalogEntry, ...]:
+    entries: list[CatalogEntry] = []
+    for url in (CMS_CATALOG_URL, CMS_ARCHIVE_URL):
+        try:
+            response = session.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise DownloadError(f"Unable to read CMS ICD catalog {url}: {exc}") from exc
+        entries.extend(parse_catalog(response.text, url))
+    return tuple(dict.fromkeys(entries))
+
+
+def _write_catalog(path: Path, entries: tuple[CatalogEntry, ...]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix="catalog.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        temporary = Path(handle.name)
+        json.dump(_catalog_records(entries), handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    temporary.replace(path)
+
+
+def _shared_catalog(
+    cache_dir: Path,
+    *,
+    offline: bool,
+    session: requests.Session,
+    refresh: bool = False,
+) -> tuple[CatalogEntry, ...]:
+    key = (str(cache_dir.resolve()), offline)
+    with _catalog_lock:
+        future = None if refresh else _catalog_cache.get(key)
+        if future is None:
+            future = Future()
+            _catalog_cache[key] = future
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        return future.result()
+
+    catalog_path = cache_dir / "catalog.json"
+    try:
+        entries = None if refresh else _read_catalog(catalog_path)
+        if entries is None:
+            if offline:
+                raise DownloadError(
+                    "Offline mode requires a valid cached CMS catalog at "
+                    f"{catalog_path}"
+                )
+            with _directory_lock(catalog_path):
+                entries = None if refresh else _read_catalog(catalog_path)
+                if entries is None:
+                    entries = _fetch_catalog(session)
+                    _write_catalog(catalog_path, entries)
+        future.set_result(entries)
+        return entries
+    except BaseException as exc:
+        future.set_exception(exc)
+        with _catalog_lock:
+            if _catalog_cache.get(key) is future:
+                _catalog_cache.pop(key, None)
+        raise
+
+
+def refresh_cms_catalog(*, cache_dir: str | Path | None = None) -> None:
+    """Fetch and atomically replace the cached CMS material catalog.
+
+    Normal online constructors reuse a valid cached catalog indefinitely. Call this
+    function when newly advertised CMS releases should become discoverable.
+    """
+    selected = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    _shared_catalog(
+        selected,
+        offline=False,
+        session=requests.Session(),
+        refresh=True,
+    )
+
+
+def _clear_catalog_memory_cache() -> None:
+    """Clear process-local catalog state for tests and diagnostics."""
+    with _catalog_lock:
+        _catalog_cache.clear()
 
 
 def fiscal_year_for(value: date) -> int:
@@ -300,69 +428,11 @@ class CMSProvider(MaterialProvider):
 
     def _load_catalog(self) -> tuple[CatalogEntry, ...]:
         if self._catalog is None:
-            catalog_path = self.cache_dir / "catalog.json"
-            if self.offline:
-                try:
-                    records = json.loads(catalog_path.read_text(encoding="utf-8"))
-                    self._catalog = tuple(
-                        CatalogEntry(
-                            **{
-                                **record,
-                                "release_date": date.fromisoformat(
-                                    record["release_date"]
-                                ),
-                            }
-                        )
-                        for record in records
-                    )
-                except (
-                    OSError,
-                    KeyError,
-                    TypeError,
-                    ValueError,
-                    json.JSONDecodeError,
-                ) as exc:
-                    raise DownloadError(
-                        "Offline mode requires a valid cached CMS catalog at "
-                        f"{catalog_path}"
-                    ) from exc
-                return self._catalog
-            entries: list[CatalogEntry] = []
-            for url in (CMS_CATALOG_URL, CMS_ARCHIVE_URL):
-                try:
-                    response = self._session.get(url, timeout=30)
-                    response.raise_for_status()
-                except requests.RequestException as exc:
-                    raise DownloadError(
-                        f"Unable to read CMS ICD catalog {url}: {exc}"
-                    ) from exc
-                entries.extend(parse_catalog(response.text, url))
-            self._catalog = tuple(dict.fromkeys(entries))
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            records = [
-                {
-                    "system": entry.system,
-                    "material": entry.material,
-                    "fiscal_year": entry.fiscal_year,
-                    "release_date": entry.release_date.isoformat(),
-                    "label": entry.label,
-                    "url": entry.url,
-                    "page_url": entry.page_url,
-                }
-                for entry in self._catalog
-            ]
-            with NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self.cache_dir,
-                prefix="catalog.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                temporary = Path(handle.name)
-                json.dump(records, handle, indent=2, sort_keys=True)
-                handle.write("\n")
-            temporary.replace(catalog_path)
+            self._catalog = _shared_catalog(
+                self.cache_dir,
+                offline=self.offline,
+                session=self._session,
+            )
         return self._catalog
 
     def _select(self, system: str, material: str) -> CatalogEntry:
@@ -464,6 +534,11 @@ class CMSProvider(MaterialProvider):
 
     def paths(self, system: str, material: str) -> tuple[Path, ...]:
         entry = self._select(system, material)
+        return self._resolve_paths(entry, system, material)
+
+    def _resolve_paths(
+        self, entry: CatalogEntry, system: str, material: str
+    ) -> tuple[Path, ...]:
         destination = self._artifact_dir(entry)
         manifest_path = destination / "manifest.json"
         if manifest_path.exists():

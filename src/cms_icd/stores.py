@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator, Mapping
+from threading import Lock
 from types import MappingProxyType
 from typing import TypeVar
 
@@ -83,9 +84,17 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
         self.direction = direction
         self.release = release
         self._provenance = MappingProxyType(dict(provenance or {}))
+        self._mapping_cache: dict[str, GEMMapping] = {}
+        self._mapping_lock = Lock()
+        self._default_provenance = (
+            GEMProvenance(release, release, release) if release is not None else None
+        )
 
     def mapping(self, source: str) -> GEMMapping:
         """Return one source's rows grouped into alternatives and scenarios."""
+        cached = self._mapping_cache.get(source)
+        if cached is not None:
+            return cached
         entries = self[source]
         simple = tuple(
             entry
@@ -109,12 +118,14 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
             )
             for scenario, choice_lists in sorted(grouped.items())
         )
-        return GEMMapping(
+        result = GEMMapping(
             source=source,
             simple_alternatives=simple,
             scenarios=scenarios,
             no_map=any(entry.no_map for entry in entries),
         )
+        with self._mapping_lock:
+            return self._mapping_cache.setdefault(source, result)
 
     def provenance(self, source: str) -> GEMProvenance:
         """Return release provenance for one source mapping."""
@@ -124,11 +135,9 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
             return self._provenance[source]
         if self.release is None:
             raise RuntimeError("GEM provenance requires release metadata")
-        return GEMProvenance(
-            vocabulary_release=self.release,
-            selected_mapping_release=self.release,
-            reviewed_through_release=self.release,
-        )
+        if self._default_provenance is None:
+            raise RuntimeError("GEM provenance requires release metadata")
+        return self._default_provenance
 
 
 class TabularStore(ReadOnlyStore[Node]):
@@ -159,6 +168,8 @@ class TabularStore(ReadOnlyStore[Node]):
             {code.replace(".", ""): node_id for code, node_id in code_lookup.items()}
         )
         self._roots = tuple(roots)
+        self._parents_cache: dict[str, tuple[Node, ...]] = {}
+        self._parents_lock = Lock()
 
     def _node_id(self, code_or_id: str) -> str:
         if code_or_id in self._code_lookup:
@@ -184,12 +195,17 @@ class TabularStore(ReadOnlyStore[Node]):
     def parents(self, code_or_id: str) -> tuple[Node, ...]:
         """Return parents from the immediate parent to the root."""
         node_id = self._node_id(code_or_id)
+        cached = self._parents_cache.get(node_id)
+        if cached is not None:
+            return cached
         node = self[node_id]
         result: list[Node] = []
         while node.parent_id:
             node = self[node.parent_id]
             result.append(node)
-        return tuple(result)
+        parents = tuple(result)
+        with self._parents_lock:
+            return self._parents_cache.setdefault(node_id, parents)
 
     def children(self, code_or_id: str) -> tuple[Node, ...]:
         """Return direct children of a node."""

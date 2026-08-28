@@ -85,13 +85,32 @@ class GEMSystemView:
                             target_universes.append(
                                 set(self._load_provider(provider, _opposite(direction)))
                             )
-                        store = _backport_corrections(stores, target_universes)
+                        if isinstance(self._provider, CMSProvider) and all(
+                            isinstance(provider, CMSProvider)
+                            for provider in self._correction_providers
+                        ):
+                            from .parsed_cache import load_corrected_gem_store
+
+                            store = load_corrected_gem_store(
+                                self._provider.cache_dir,
+                                stores,
+                                target_universes,
+                                build=lambda: _backport_corrections(
+                                    stores, target_universes
+                                ),
+                            )
+                        else:
+                            store = _backport_corrections(stores, target_universes)
                     self._stores[direction] = store
         return store
 
     def _load_provider(
         self, provider: MaterialProvider, direction: GEMDirection
     ) -> GEMStore:
+        if isinstance(provider, CMSProvider):
+            from .parsed_cache import load_gem_store
+
+            return load_gem_store(provider, self.system, direction)
         return parse_gems(
             provider.paths(self.system, "gems"),
             system=self.system,

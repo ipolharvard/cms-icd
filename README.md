@@ -101,8 +101,25 @@ For historical GEMs with later CMS corrections, use:
 gems = GEMKnowledgeBase.corrected_from_cms(fiscal_year=2016)
 ```
 
-The library returns the official mapping structure and does not choose a
-preferred target for you. See the
+These knowledge-base interfaces return the official mapping structure and do
+not choose a preferred target for you. For bulk best-effort interpretation,
+load every compatible diagnosis year at once:
+
+```python
+from cms_icd import resolve_icd9_to_icd10_cm_mappings
+
+by_year = resolve_icd9_to_icd10_cm_mappings()
+targets = by_year[2016]["4280"].target_codes
+```
+
+Use `resolve_icd9_to_icd10_pcs_mappings()` for procedures; its results expose
+`target_patterns`. Pass an explicit `fiscal_years` iterable for a pinned
+research cohort. An omitted value discovers every compatible GEM year through
+the FY2018 correction horizon, currently FY2014--FY2018.
+
+Resolution is best effort rather than an authoritative one-to-one conversion.
+It preserves required combinations, may collapse diagnosis alternatives to a
+common hierarchy ancestor, and may mask disagreeing PCS axes with `?`. See the
 [GEM guide](https://ipolharvard.github.io/cms-icd/guide/general-equivalence-mappings/)
 for alternatives, combinations, flags, and correction history.
 

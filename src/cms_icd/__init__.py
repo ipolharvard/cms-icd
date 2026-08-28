@@ -28,10 +28,21 @@ from .models import (
     GEMProvenance,
     GEMScenario,
     Guideline,
+    ICDCMMappingResolution,
+    ICDMappingReason,
+    ICDMappingStatus,
+    ICDPCSMappingResolution,
     InstructionalNote,
     Release,
     Term,
 )
+from .resolution import (
+    resolve_icd9_to_icd10_cm_mapping,
+    resolve_icd9_to_icd10_cm_mappings,
+    resolve_icd9_to_icd10_pcs_mapping,
+    resolve_icd9_to_icd10_pcs_mappings,
+)
+from .sources import refresh_cms_catalog
 from .stores import GEMStore
 
 __all__ = [
@@ -52,11 +63,20 @@ __all__ = [
     "ICD10CMKnowledgeBase",
     "ICD10KnowledgeBase",
     "ICD10PCSKnowledgeBase",
+    "ICDCMMappingResolution",
     "ICDKnowledgeBaseError",
+    "ICDMappingReason",
+    "ICDMappingStatus",
+    "ICDPCSMappingResolution",
     "InstructionalNote",
     "MaterialUnavailableError",
     "ParseError",
     "Release",
     "ReleaseUnavailableError",
     "Term",
+    "refresh_cms_catalog",
+    "resolve_icd9_to_icd10_cm_mapping",
+    "resolve_icd9_to_icd10_cm_mappings",
+    "resolve_icd9_to_icd10_pcs_mapping",
+    "resolve_icd9_to_icd10_pcs_mappings",
 ]

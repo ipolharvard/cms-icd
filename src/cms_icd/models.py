@@ -123,6 +123,56 @@ class GEMProvenance(Record):
     blocked_by_code_lifecycle_release: Release | None = None
 
 
+class ICDMappingStatus(StrEnum):
+    """Whether a best-effort ICD-9 mapping produced a usable ICD-10 result."""
+
+    MAPPED = "mapped"
+    UNMAPPABLE = "unmappable"
+
+
+class ICDMappingReason(StrEnum):
+    """Deterministic reason for a best-effort ICD-9 mapping resolution."""
+
+    EXACT = "exact"
+    SINGLE_APPROXIMATE = "single_approximate"
+    COMMON_ANCESTOR = "common_ancestor"
+    AXIS_MASKED = "axis_masked"
+    COMBINATION = "combination"
+    OFFICIAL_NO_MAP = "official_no_map"
+    DIVERGENT_ALTERNATIVES = "divergent_alternatives"
+    DIVERGENT_SCENARIOS = "divergent_scenarios"
+    INVALID_TARGET = "invalid_target"
+    UNKNOWN_SOURCE = "unknown_source"
+
+
+@dataclass(frozen=True, slots=True)
+class ICDCMMappingResolution(Record):
+    """Best-effort ICD-9-CM diagnosis resolution for one source code."""
+
+    source_code: str
+    target_codes: tuple[str, ...]
+    status: ICDMappingStatus
+    reason: ICDMappingReason
+    approximate: bool
+    gem_provenance: GEMProvenance | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ICDPCSMappingResolution(Record):
+    """Best-effort ICD-9-CM procedure resolution for one source code.
+
+    A ``?`` in a target pattern marks an ICD-10-PCS axis on which the official
+    alternatives disagree.
+    """
+
+    source_code: str
+    target_patterns: tuple[str, ...]
+    status: ICDMappingStatus
+    reason: ICDMappingReason
+    approximate: bool
+    gem_provenance: GEMProvenance | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Node(Record):
     """A node in an ICD tabular hierarchy."""

@@ -20,8 +20,10 @@ from cms_icd.models import Release
 from cms_icd.sources import (
     CMSProvider,
     DirectoryProvider,
+    _clear_catalog_memory_cache,
     default_cache_dir,
     parse_catalog,
+    refresh_cms_catalog,
 )
 
 CATALOG_HTML = """
@@ -261,10 +263,12 @@ class FakeSession:
     def __init__(self, archive: bytes) -> None:
         self.archive = archive
         self.downloads = 0
+        self.catalog_reads = 0
 
     def get(self, url: str, **kwargs):
         del kwargs
         if "coding-billing/icd-10-codes" in url:
+            self.catalog_reads += 1
             return FakeResponse(text=CATALOG_HTML)
         self.downloads += 1
         return FakeResponse(content=self.archive)
@@ -493,6 +497,36 @@ def test_concurrent_requests_share_one_download(tmp_path: Path) -> None:
 
     assert {result[0] for result in results} == {results[0][0]}
     assert session.downloads == 1
+
+
+def test_catalog_is_reused_until_explicit_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_session = FakeSession(_cm_archive())
+    first = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=first_session,  # type: ignore[arg-type]
+    )
+
+    assert first._load_catalog()
+    assert first_session.catalog_reads == 2
+
+    _clear_catalog_memory_cache()
+    second_session = FakeSession(_cm_archive())
+    second = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=second_session,  # type: ignore[arg-type]
+    )
+    assert second._load_catalog()
+    assert second_session.catalog_reads == 0
+
+    refreshed_session = FakeSession(_cm_archive())
+    monkeypatch.setattr("cms_icd.sources.requests.Session", lambda: refreshed_session)
+    refresh_cms_catalog(cache_dir=tmp_path)
+
+    assert refreshed_session.catalog_reads == 2
 
 
 def test_directory_provider_reports_missing_and_ambiguous_files(

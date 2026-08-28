@@ -115,3 +115,45 @@ required.
 `GEMProvenance` records the historical vocabulary release, the release supplying the
 selected rows, the pinned review horizon, and the first lifecycle boundary when one was
 encountered. Missing intermediate releases remain errors; there is no silent fallback.
+
+## Bulk best-effort resolution
+
+Applications that need complete conversion tables up front can resolve several
+historical vocabularies in one request:
+
+```python
+from cms_icd import (
+    resolve_icd9_to_icd10_cm_mappings,
+    resolve_icd9_to_icd10_pcs_mappings,
+)
+
+years = range(2014, 2019)
+diagnoses = resolve_icd9_to_icd10_cm_mappings(years)
+procedures = resolve_icd9_to_icd10_pcs_mappings(years)
+
+diagnosis_targets = diagnoses[2016]["4280"].target_codes
+procedure_patterns = procedures[2016]["0001"].target_patterns
+```
+
+The outer mappings are keyed by fiscal year and the inner mappings by ICD-9
+source code. Both levels are immutable. Passing `fiscal_years=None`, the
+default, discovers every compatible advertised GEM year through the pinned
+FY2018 correction horizon. Pass explicit years when a cohort must remain fixed.
+
+The resolver applies a deterministic best-effort policy; it is not an
+authoritative one-to-one clinical conversion:
+
+- a single official target is retained, including its approximate flag;
+- diagnosis alternatives are reduced to their lowest usable ICD-10-CM common
+  ancestor when one exists;
+- complete combination mappings retain every required target and its order;
+- procedure alternatives retain shared axes and use `?` where later axes
+  disagree;
+- incompatible alternatives, invalid targets, and official no-map rows return
+  an `unmappable` status with empty targets.
+
+Every resolution includes a reason and the corrected GEM provenance. Unknown
+source codes are absent from the mapping; callers choose their own missing-code
+fallback. The singular `resolve_icd9_to_icd10_cm_mapping()` and
+`resolve_icd9_to_icd10_pcs_mapping()` functions provide the same result for one
+fiscal year through the bulk loader.

@@ -41,6 +41,7 @@ nav:
   - API reference:
       - Knowledge bases: reference/knowledge-base.md
       - GEM API: reference/gems.md
+      - Mapping resolution: reference/resolution.md
       - Records: reference/models.md
       - Stores: reference/stores.md
       - Sources: reference/sources.md

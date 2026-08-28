@@ -92,7 +92,12 @@ class _SystemKnowledgeBase:
         return self._provider
 
     def _load_tabular(self) -> TabularStore:
-        path = self._require_provider().paths(self.system, "tabular")[0]
+        provider = self._require_provider()
+        if isinstance(provider, CMSProvider):
+            from .parsed_cache import load_tabular_store
+
+            return load_tabular_store(provider, self.system)
+        path = provider.paths(self.system, "tabular")[0]
         if self.system == "cm":
             return parse_cm_tabular(path)
         return parse_pcs_tabular(path)
