@@ -164,6 +164,28 @@ def _texts(element: ET.Element, path: str) -> list[str]:
     ]
 
 
+def _int_attrib(
+    element: ET.Element,
+    name: str,
+    *,
+    default: int | None = None,
+    path: str | Path,
+    context: str,
+) -> int:
+    """Read an integer XML attribute, raising ParseError with file context."""
+    raw = element.attrib.get(name)
+    if raw is None:
+        if default is not None:
+            return default
+        raise ParseError(f"Missing {name!r} attribute in {path} ({context})")
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ParseError(
+            f"Non-numeric {name!r} attribute {raw!r} in {path} ({context})"
+        ) from exc
+
+
 def _apply_cm_notes(draft: _NodeDraft, element: ET.Element) -> None:
     draft.notes = _texts(element, "notes/note")
     draft.includes = _texts(element, "includes/note")
@@ -365,7 +387,13 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                     )
                     for label in axis.findall("label")
                 ]
-                declared = int(axis.attrib.get("values", len(labels)))
+                declared = _int_attrib(
+                    axis,
+                    "values",
+                    default=len(labels),
+                    path=path,
+                    context=f"PCS table {table_id}, row {row_number}, axis {title!r}",
+                )
                 if declared != len(labels):
                     counts = f"declares {declared} values but defines {len(labels)}"
                     raise ParseError(
@@ -373,7 +401,13 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                     )
                 axes.append(labels)
             expected = reduce(mul, (len(axis) for axis in axes), 1)
-            declared_codes = int(row.attrib.get("codes", expected))
+            declared_codes = _int_attrib(
+                row,
+                "codes",
+                default=expected,
+                path=path,
+                context=f"PCS table {table_id}, row {row_number}",
+            )
             if declared_codes != expected:
                 raise ParseError(
                     f"PCS row declares {declared_codes} codes but defines {expected} "
@@ -459,7 +493,10 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
         for cell in element.findall("cell"):
             value = (cell.text or "").strip()
             if value and value != "-":
-                cells.append((int(cell.attrib["col"]), value))
+                column = _int_attrib(
+                    cell, "col", path=path, context=f"index term {title!r}"
+                )
+                cells.append((column, value))
         code = (element.findtext("code") or "").strip() or None
         manifestation = (element.findtext("manif") or "").strip() or None
         if code and "-" in code:
@@ -467,14 +504,14 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
             assignable = False
         else:
             assignable = bool(code or manifestation)
-        path = ", ".join(item for item in (parent_path, title) if item)
+        term_path = ", ".join(item for item in (parent_path, title) if item)
         children: list[str] = []
         drafts[identifier] = {
             "id": identifier,
             "title": title,
             "parent_id": parent_id,
             "children_ids": children,
-            "path": path,
+            "path": term_path,
             "code": code,
             "manifestation_code": manifestation,
             "assignable": assignable,
@@ -497,7 +534,7 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                     "title": headings.get(column, f"Column {column}"),
                     "parent_id": identifier,
                     "children_ids": [],
-                    "path": f"{path}, {headings.get(column, f'Column {column}')}",
+                    "path": f"{term_path}, {headings.get(column, f'Column {column}')}",
                     "code": cell_code,
                     "manifestation_code": None,
                     "assignable": cell_assignable,
@@ -514,7 +551,7 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                 identifier=f"{identifier}.{child_number}",
                 headings=headings,
                 source=source,
-                parent_path=path,
+                parent_path=term_path,
             )
 
     for path in paths:
@@ -524,10 +561,14 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
             raise ParseError(
                 f"Unable to parse ICD-10-{system.upper()} index {path}: {exc}"
             ) from exc
-        headings = {
-            int(item.attrib["col"]): (item.text or "").strip()
-            for item in root.findall("indexHeading/head")
-        }
+        headings: dict[int, str] = {}
+        for item in root.findall("indexHeading/head"):
+            heading = (item.text or "").strip()
+            headings[
+                _int_attrib(
+                    item, "col", path=path, context=f"index heading {heading!r}"
+                )
+            ] = heading
         source_name = path.stem.lower()
         source = (
             "Neoplasm"

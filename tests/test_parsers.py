@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -68,6 +69,22 @@ INDEX_XML = """\
 """
 
 
+INDEX_CELL_XML = """\
+<ICD10CM.index>
+  <indexHeading>
+    <head col="1">Code</head>
+  </indexHeading>
+  <letter>
+    <title>H</title>
+    <mainTerm>
+      <title>Hypertension (arterial)</title>
+      <cell col="1">I10</cell>
+    </mainTerm>
+  </letter>
+</ICD10CM.index>
+"""
+
+
 def test_cm_parser_builds_direct_hierarchy_and_notes(tmp_path: Path) -> None:
     path = tmp_path / "icd10cm_tabular.xml"
     path.write_text(CM_XML)
@@ -93,6 +110,22 @@ def test_pcs_parser_validates_and_generates_combinations(tmp_path: Path) -> None
         parse_pcs_tabular(bad_path)
 
 
+def test_pcs_parser_axis_non_numeric_values_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(PCS_XML.replace('values="2"', 'values="abc"'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_row_non_numeric_codes_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(PCS_XML.replace('codes="2"', 'codes="abc"'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
 def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) -> None:
     path = tmp_path / "icd10cm_index.xml"
     path.write_text(INDEX_XML)
@@ -103,6 +136,49 @@ def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) ->
     assert main.title == "Hypertension"
     assert main.optional_modifiers == ("arterial",)
     assert child.path == "Hypertension, secondary"
+
+
+def test_index_parser_reads_numbered_cells(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML)
+
+    store = parse_index((path,), system="cm")
+    main = store.main_terms()[0]
+    cell = store.children(main.id)[0]
+    assert cell.title == "Code"
+    assert cell.code == "I10"
+
+
+def test_index_parser_cell_missing_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<cell col="1">', "<cell>"))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_cell_non_numeric_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<cell col="1">', '<cell col="abc">'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_head_missing_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<head col="1">', "<head>"))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_head_non_numeric_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<head col="1">', '<head col="abc">'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
 
 
 class _MediaBox:
