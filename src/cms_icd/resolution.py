@@ -13,6 +13,7 @@ from .exceptions import ReleaseUnavailableError
 from .gems import GEMKnowledgeBase
 from .knowledge_base import ICD10KnowledgeBase
 from .models import (
+    Code,
     GEMChoiceList,
     GEMEntry,
     GEMMapping,
@@ -60,7 +61,7 @@ def _common_ancestor(
     if not targets:
         return None
     ancestor = tabular.lowest_common_ancestor(targets)
-    if ancestor is None:
+    if ancestor is None or not isinstance(ancestor, Code):
         return None
     code = ancestor.name.replace(".", "")
     return code if len(code) >= 3 and code.lower() != "cm" else None

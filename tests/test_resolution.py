@@ -17,7 +17,7 @@ from cms_icd import (
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
 )
-from cms_icd.models import GEMDirection, Node, Release
+from cms_icd.models import Code, GEMDirection, Node, Release
 from cms_icd.resolution import (
     _discover_years,
     _resolve_cm_mapping,
@@ -55,26 +55,91 @@ def tabular() -> TabularStore:
             "cm",
             children_ids=("R31", "A70", "J17", "Q65", "S12", "S22"),
         ),
-        "R31": Node("R31", "R31", parent_id="cm", children_ids=("R311", "R312")),
-        "R311": Node("R311", "R31.1", parent_id="R31"),
-        "R312": Node("R312", "R31.2", parent_id="R31", children_ids=("R3121", "R3129")),
-        "R3121": Node("R3121", "R31.21", parent_id="R312"),
-        "R3129": Node("R3129", "R31.29", parent_id="R312"),
-        "A70": Node("A70", "A70", parent_id="cm"),
-        "J17": Node("J17", "J17", parent_id="cm"),
-        "Q65": Node("Q65", "Q65", parent_id="cm", children_ids=("Q650", "Q653")),
-        "Q650": Node("Q650", "Q65.0", parent_id="Q65", children_ids=("Q6501", "Q6502")),
-        "Q6501": Node("Q6501", "Q65.01", parent_id="Q650"),
-        "Q6502": Node("Q6502", "Q65.02", parent_id="Q650"),
-        "Q653": Node("Q653", "Q65.3", parent_id="Q65", children_ids=("Q6531", "Q6532")),
-        "Q6531": Node("Q6531", "Q65.31", parent_id="Q653"),
-        "Q6532": Node("Q6532", "Q65.32", parent_id="Q653"),
-        "S12": Node("S12", "S12", parent_id="cm"),
-        "S22": Node("S22", "S22", parent_id="cm"),
+        "R31": Code("R31", "R31", parent_id="cm", children_ids=("R311", "R312")),
+        "R311": Code("R311", "R31.1", parent_id="R31"),
+        "R312": Code("R312", "R31.2", parent_id="R31", children_ids=("R3121", "R3129")),
+        "R3121": Code("R3121", "R31.21", parent_id="R312"),
+        "R3129": Code("R3129", "R31.29", parent_id="R312"),
+        "A70": Code("A70", "A70", parent_id="cm"),
+        "J17": Code("J17", "J17", parent_id="cm"),
+        "Q65": Code("Q65", "Q65", parent_id="cm", children_ids=("Q650", "Q653")),
+        "Q650": Code("Q650", "Q65.0", parent_id="Q65", children_ids=("Q6501", "Q6502")),
+        "Q6501": Code("Q6501", "Q65.01", parent_id="Q650"),
+        "Q6502": Code("Q6502", "Q65.02", parent_id="Q650"),
+        "Q653": Code("Q653", "Q65.3", parent_id="Q65", children_ids=("Q6531", "Q6532")),
+        "Q6531": Code("Q6531", "Q65.31", parent_id="Q653"),
+        "Q6532": Code("Q6532", "Q65.32", parent_id="Q653"),
+        "S12": Code("S12", "S12", parent_id="cm"),
+        "S22": Code("S22", "S22", parent_id="cm"),
     }
     lookup = {
         node.name.replace(".", ""): key for key, node in nodes.items() if key != "cm"
     }
+    return TabularStore(nodes, lookup, ("cm",))
+
+
+@pytest.fixture
+def hierarchical_tabular() -> TabularStore:
+    """Chapter/section-shaped store mirroring ``parse_cm_tabular`` output."""
+    circulatory = "Diseases of the circulatory system"
+    circulatory_id = f"cm_{circulatory}"
+    respiratory = "Diseases of the respiratory system"
+    respiratory_id = f"cm_{respiratory}"
+    section_i10 = f"{circulatory_id}_I10-I15"
+    section_i20 = f"{circulatory_id}_I20-I28"
+    section_j10 = f"{respiratory_id}_J10-J16"
+    nodes = {
+        "cm": Node(
+            "cm",
+            "cm",
+            children_ids=(circulatory_id, respiratory_id),
+        ),
+        circulatory_id: Node(
+            circulatory_id,
+            circulatory,
+            parent_id="cm",
+            children_ids=(section_i10, section_i20),
+        ),
+        respiratory_id: Node(
+            respiratory_id,
+            respiratory,
+            parent_id="cm",
+            children_ids=(section_j10,),
+        ),
+        section_i10: Node(
+            section_i10,
+            "I10-I15",
+            parent_id=circulatory_id,
+            children_ids=("I10", "I12", "I15"),
+        ),
+        section_i20: Node(
+            section_i20,
+            "I20-I28",
+            parent_id=circulatory_id,
+            children_ids=("I16", "I20"),
+        ),
+        section_j10: Node(
+            section_j10,
+            "J10-J16",
+            parent_id=respiratory_id,
+            children_ids=("J10",),
+        ),
+        "I10": Code("I10", "I10", parent_id=section_i10),
+        "I12": Code(
+            "I12",
+            "I12",
+            parent_id=section_i10,
+            children_ids=("I12.0", "I12.1"),
+        ),
+        "I15": Code("I15", "I15", parent_id=section_i10),
+        "I16": Code("I16", "I16", parent_id=section_i20),
+        "I20": Code("I20", "I20", parent_id=section_i20),
+        "I12.0": Code("I12.0", "I12.0", parent_id="I12"),
+        "I12.1": Code("I12.1", "I12.1", parent_id="I12"),
+        "J10": Code("J10", "J10", parent_id=section_j10),
+    }
+    lookup = {node.name: node.id for node in nodes.values() if isinstance(node, Code)}
+    lookup["cm"] = "cm"
     return TabularStore(nodes, lookup, ("cm",))
 
 
@@ -199,6 +264,146 @@ def test_cm_divergent_scenarios_are_unmappable(tabular: TabularStore) -> None:
 
     assert resolved.status is ICDMappingStatus.UNMAPPABLE
     assert resolved.reason is ICDMappingReason.DIVERGENT_SCENARIOS
+
+
+def test_cm_section_lca_is_unmappable(hierarchical_tabular: TabularStore) -> None:
+    mapping = GEMMapping(
+        "4019",
+        (_entry("4019", "I10"), _entry("4019", "I15")),
+        (),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_ALTERNATIVES
+    assert resolved.target_codes == ()
+
+
+def test_cm_chapter_lca_is_unmappable(hierarchical_tabular: TabularStore) -> None:
+    mapping = GEMMapping(
+        "4029",
+        (_entry("4029", "I10"), _entry("4029", "I20")),
+        (),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_ALTERNATIVES
+    assert resolved.target_codes == ()
+
+
+def test_cm_root_lca_is_unmappable(hierarchical_tabular: TabularStore) -> None:
+    mapping = GEMMapping(
+        "4039",
+        (_entry("4039", "I10"), _entry("4039", "J10")),
+        (),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_ALTERNATIVES
+    assert resolved.target_codes == ()
+
+
+def test_cm_scenario_choice_list_section_lca_is_unmappable(
+    hierarchical_tabular: TabularStore,
+) -> None:
+    mapping = GEMMapping(
+        "4279",
+        (),
+        (
+            GEMScenario(
+                1,
+                (
+                    GEMChoiceList(
+                        1,
+                        (
+                            _entry(
+                                "4279",
+                                "I10",
+                                combination=True,
+                                scenario=1,
+                                choice=1,
+                            ),
+                            _entry(
+                                "4279",
+                                "I15",
+                                combination=True,
+                                scenario=1,
+                                choice=1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_SCENARIOS
+    assert resolved.target_codes == ()
+
+
+def test_cm_scenario_collapse_section_lca_is_unmappable(
+    hierarchical_tabular: TabularStore,
+) -> None:
+    def scenario(number: int, target: str) -> GEMScenario:
+        return GEMScenario(
+            number,
+            (
+                GEMChoiceList(
+                    1,
+                    (
+                        _entry(
+                            "4119",
+                            target,
+                            combination=True,
+                            scenario=number,
+                            choice=1,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    mapping = GEMMapping("4119", (), (scenario(1, "I10"), scenario(2, "I15")))
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_SCENARIOS
+    assert resolved.target_codes == ()
+
+
+def test_cm_single_target_under_section_resolves_exact(
+    hierarchical_tabular: TabularStore,
+) -> None:
+    mapping = GEMMapping("4010", (_entry("4010", "I10", approximate=False),), ())
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.target_codes == ("I10",)
+    assert resolved.reason is ICDMappingReason.EXACT
+
+
+def test_cm_same_category_subcodes_still_collapse(
+    hierarchical_tabular: TabularStore,
+) -> None:
+    mapping = GEMMapping(
+        "4020",
+        (_entry("4020", "I120"), _entry("4020", "I121")),
+        (),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=hierarchical_tabular)
+
+    assert resolved.target_codes == ("I12",)
+    assert resolved.reason is ICDMappingReason.COMMON_ANCESTOR
 
 
 def test_pcs_alternatives_mask_only_disagreeing_axes() -> None:
