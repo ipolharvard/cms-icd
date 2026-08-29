@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
+import threading
 from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
 
+from cms_icd import knowledge_base
 from cms_icd.knowledge_base import ICD10CMKnowledgeBase, ICD10KnowledgeBase
 from cms_icd.models import Guideline, Release
 from cms_icd.sources import MaterialProvider
@@ -12,6 +15,8 @@ from cms_icd.stores import GuidelineStore
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from cms_icd.stores import TabularStore
 
 
 class RecordingProvider(MaterialProvider):
@@ -79,3 +84,73 @@ def test_render_guidelines_cache_is_bounded_and_preserves_semantics() -> None:
 
     with pytest.raises(KeyError, match="MISSING"):
         cm.render_guidelines(["MISSING"])
+
+
+def test_cm_and_pcs_view_creation_is_race_free(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cm = tmp_path / "icd10cm_tabular.xml"
+    cm.write_text(
+        "<ICD10CM.tabular><chapter><name>1</name><desc>A</desc>"
+        '<section id="A00-A00"><desc>B</desc><diag><name>A00</name>'
+        "<desc>Cholera</desc></diag></section></chapter></ICD10CM.tabular>"
+    )
+    pcs = tmp_path / "icd10pcs_tables.xml"
+    pcs.write_text(
+        "<ICD10PCS.tables><pcsTable>"
+        '<axis><label code="0">Section</label><title>Section</title></axis>'
+        '<pcsRow><axis values="1"><title>Section</title>'
+        '<label code="0">Medical and Surgical</label></axis></pcsRow>'
+        "</pcsTable></ICD10PCS.tables>"
+    )
+    kb = ICD10KnowledgeBase.from_directory(
+        tmp_path,
+        fiscal_year=2026,
+        release_date=date(2025, 10, 1),
+    )
+
+    cm_loads: list[Path] = []
+    pcs_loads: list[Path] = []
+    parse_cm_tabular = knowledge_base.parse_cm_tabular
+    parse_pcs_tabular = knowledge_base.parse_pcs_tabular
+
+    def counting_cm(path: Path) -> TabularStore:
+        cm_loads.append(path)
+        return parse_cm_tabular(path)
+
+    def counting_pcs(path: Path) -> TabularStore:
+        pcs_loads.append(path)
+        return parse_pcs_tabular(path)
+
+    monkeypatch.setattr(knowledge_base, "parse_cm_tabular", counting_cm)
+    monkeypatch.setattr(knowledge_base, "parse_pcs_tabular", counting_pcs)
+
+    cm_views: list[object] = []
+    pcs_views: list[object] = []
+    barrier = threading.Barrier(2)
+
+    def worker() -> None:
+        barrier.wait()
+        cm_view = kb.cm
+        pcs_view = kb.pcs
+        cm_views.append(cm_view)
+        pcs_views.append(pcs_view)
+        _ = cm_view.tabular
+        _ = pcs_view.tabular
+
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-4)
+    try:
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    assert cm_views[0] is cm_views[1]
+    assert pcs_views[0] is pcs_views[1]
+    assert len(cm_loads) == 1
+    assert len(pcs_loads) == 1
