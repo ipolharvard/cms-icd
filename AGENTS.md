@@ -56,7 +56,7 @@ Do not run `make test-live` as part of routine validation. When live testing is
 requested, keep output compact:
 
 ```bash
-.venv/bin/python -m pytest -q --tb=line -m live_cms tests/live
+.venv/bin/python -m pytest -q --tb=line -m 'live_cms and not live_exhaustive' tests/live
 ```
 
 Use the narrower targets when only one external contract needs validation:
