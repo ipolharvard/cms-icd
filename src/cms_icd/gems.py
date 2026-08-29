@@ -154,6 +154,8 @@ class GEMKnowledgeBase:
         self._correction_providers = correction_providers
         self._cm: GEMSystemView | None = None
         self._pcs: GEMSystemView | None = None
+        self._cm_lock = Lock()
+        self._pcs_lock = Lock()
 
     @classmethod
     def from_cms(
@@ -244,22 +246,26 @@ class GEMKnowledgeBase:
     def cm(self) -> GEMSystemView:
         """Return the lazy diagnosis GEM view."""
         if self._cm is None:
-            self._cm = GEMSystemView(
-                self._provider,
-                "cm",
-                correction_providers=self._correction_providers,
-            )
+            with self._cm_lock:
+                if self._cm is None:
+                    self._cm = GEMSystemView(
+                        self._provider,
+                        "cm",
+                        correction_providers=self._correction_providers,
+                    )
         return self._cm
 
     @property
     def pcs(self) -> GEMSystemView:
         """Return the lazy procedure GEM view."""
         if self._pcs is None:
-            self._pcs = GEMSystemView(
-                self._provider,
-                "pcs",
-                correction_providers=self._correction_providers,
-            )
+            with self._pcs_lock:
+                if self._pcs is None:
+                    self._pcs = GEMSystemView(
+                        self._provider,
+                        "pcs",
+                        correction_providers=self._correction_providers,
+                    )
         return self._pcs
 
     def __repr__(self) -> str:
@@ -293,7 +299,13 @@ def _targets(entries: tuple) -> set[str]:
 def _backport_corrections(
     stores: list[GEMStore], target_universes: list[set[str]]
 ) -> GEMStore:
-    """Backport correction-only row sets without crossing code lifecycle changes."""
+    """Backport correction-only row sets without crossing code lifecycle changes.
+
+    A source is adopted from a later release only while it stays present in every year's
+    store, unblocked, and lineage-equal: ``values`` always holds the adopted lineage,
+    the unchanged-skip and adoption steps both preserve that invariant, and ``blocked``
+    only grows, so a blocked source never resumes.
+    """
     if len(stores) != len(target_universes) or not stores:
         raise ValueError("A target universe is required for every GEM store")
     base = stores[0]
@@ -323,8 +335,7 @@ def _backport_corrections(
             new_targets = _targets(new_entries)
             lifecycle = bool((old_targets | new_targets) & (introduced | retired))
             historically_compatible = new_targets <= base_targets
-            lineage_matches = values[source] == old_entries
-            if lifecycle or not historically_compatible or not lineage_matches:
+            if lifecycle or not historically_compatible:
                 blocked[source] = new.release
                 continue
             values[source] = new_entries

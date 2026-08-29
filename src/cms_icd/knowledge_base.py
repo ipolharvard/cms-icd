@@ -358,6 +358,8 @@ class ICD10KnowledgeBase:
         self._provider = provider
         self._cm: ICD10CMKnowledgeBase | None = None
         self._pcs: ICD10PCSKnowledgeBase | None = None
+        self._cm_lock = Lock()
+        self._pcs_lock = Lock()
 
     @classmethod
     def from_cms(
@@ -454,14 +456,18 @@ class ICD10KnowledgeBase:
     def cm(self) -> ICD10CMKnowledgeBase:
         """Return the lazy ICD-10-CM view."""
         if self._cm is None:
-            self._cm = ICD10CMKnowledgeBase(self._provider)
+            with self._cm_lock:
+                if self._cm is None:
+                    self._cm = ICD10CMKnowledgeBase(self._provider)
         return self._cm
 
     @property
     def pcs(self) -> ICD10PCSKnowledgeBase:
         """Return the lazy ICD-10-PCS view."""
         if self._pcs is None:
-            self._pcs = ICD10PCSKnowledgeBase(self._provider)
+            with self._pcs_lock:
+                if self._pcs is None:
+                    self._pcs = ICD10PCSKnowledgeBase(self._provider)
         return self._pcs
 
     def load_all(self) -> None:
