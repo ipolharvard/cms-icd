@@ -472,12 +472,23 @@ def _write_lock_holder(lock: Path, pid: int) -> None:
 def _reclaim_stale_lock(lock: Path) -> bool:
     """Move a holder-less lock aside and delete it.
 
-    Return True on success.
+    The staleness verdict is re-checked on the moved directory: if the holder
+    completed its atomic marker write while the directory was being moved, the
+    lock is restored instead of deleted, so a live holder can never lose its
+    lock to an in-flight reclaim. Return True when the lock was removed.
     """
     try:
         leftover = lock.with_name(f"{lock.name}.stale.{os.getpid()}")
         lock.rename(leftover)
     except OSError:
+        return False
+    if not _lock_is_stale(leftover):
+        try:
+            leftover.rename(lock)
+        except OSError:
+            # The lock name was taken in the meantime; the orphaned holder
+            # directory cannot be restored, so remove it.
+            shutil.rmtree(leftover, ignore_errors=True)
         return False
     shutil.rmtree(leftover, ignore_errors=True)
     return True
@@ -530,7 +541,9 @@ def _directory_lock(
                 ) from None
             continue
         except OSError:
-            if _lock_holder_pid(lock) != os.getpid():
+            # Only remove the lock when its marker identifies this process;
+            # a missing or foreign marker may belong to a concurrent holder.
+            if _lock_holder_pid(lock) == os.getpid():
                 shutil.rmtree(lock, ignore_errors=True)
             raise DownloadError(
                 f"Unable to record holder in cache lock: {lock}"
