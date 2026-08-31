@@ -28,6 +28,7 @@ from cms_icd.sources import (
     DirectoryProvider,
     _clear_catalog_memory_cache,
     _directory_lock,
+    _reclaim_stale_lock,
     default_cache_dir,
     parse_catalog,
     refresh_cms_catalog,
@@ -627,6 +628,23 @@ def test_live_holder_lock_is_waited_not_reclaimed(tmp_path: Path) -> None:
     with _directory_lock(target):
         pass
     assert not (tmp_path / "catalog.json.lock").exists()
+
+
+def test_reclaim_restores_lock_whose_marker_landed_before_rename(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / "catalog.json.lock"
+    lock.mkdir()
+    # A waiter's staleness verdict was computed while the holder (this
+    # process) was between mkdir and its atomic marker write; the marker
+    # landed before the rename, so the holder is live and must keep the
+    # lock rather than have it reclaimed in flight.
+    (lock / _LOCK_MARKER_NAME).write_text(str(os.getpid()), encoding="ascii")
+
+    assert not _reclaim_stale_lock(lock)
+
+    assert lock.exists()
+    assert (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii") == str(os.getpid())
 
 
 def test_unknown_fallback_value_is_rejected() -> None:
