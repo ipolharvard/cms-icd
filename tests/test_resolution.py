@@ -13,6 +13,7 @@ from cms_icd import (
     GEMStore,
     ICDMappingReason,
     ICDMappingStatus,
+    clear_resolution_memory_cache,
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
@@ -20,6 +21,7 @@ from cms_icd import (
 from cms_icd.models import GEMDirection, Node, Release
 from cms_icd.resolution import (
     _discover_years,
+    _resolution_cache,
     _resolve_cm_mapping,
     _resolve_pcs_mapping,
 )
@@ -410,3 +412,33 @@ def test_single_year_pcs_wrapper_uses_bulk_loader(
     )
 
     assert resolve_icd9_to_icd10_pcs_mapping(fiscal_year=2018) is expected
+
+
+def test_clear_resolution_memory_cache_empties_populated_cache(
+    monkeypatch: pytest.MonkeyPatch, tabular: TabularStore
+) -> None:
+    release = Release(2018, date(2017, 10, 1))
+    store = GEMStore(
+        {"0020": (_entry("0020", "A70"),)},
+        system="cm",
+        direction=GEMDirection.ICD9_TO_ICD10,
+        release=release,
+    )
+    gems = SimpleNamespace(cm=SimpleNamespace(icd9_to_icd10=store))
+    knowledge = SimpleNamespace(cm=SimpleNamespace(tabular=tabular))
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **_: gems,
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution.ICD10KnowledgeBase.from_cms", lambda **_: knowledge
+    )
+    entries_before = len(_resolution_cache)
+
+    resolved = resolve_icd9_to_icd10_cm_mapping(fiscal_year=2018)
+    assert resolved["0020"].target_codes == ("A70",)
+    assert len(_resolution_cache) > entries_before
+
+    clear_resolution_memory_cache()
+
+    assert not _resolution_cache
