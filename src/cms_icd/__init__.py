@@ -37,6 +37,7 @@ from .models import (
     Term,
 )
 from .resolution import (
+    clear_resolution_memory_cache,
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
@@ -74,6 +75,7 @@ __all__ = [
     "Release",
     "ReleaseUnavailableError",
     "Term",
+    "clear_resolution_memory_cache",
     "refresh_cms_catalog",
     "resolve_icd9_to_icd10_cm_mapping",
     "resolve_icd9_to_icd10_cm_mappings",
