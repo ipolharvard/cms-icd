@@ -38,6 +38,7 @@ from .models import (
 )
 from .parsed_cache import clear_memory_cache
 from .resolution import (
+    clear_resolution_memory_cache,
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
@@ -77,6 +78,7 @@ __all__ = [
     "Term",
     "clear_catalog_memory_cache",
     "clear_memory_cache",
+    "clear_resolution_memory_cache",
     "refresh_cms_catalog",
     "resolve_icd9_to_icd10_cm_mapping",
     "resolve_icd9_to_icd10_cm_mappings",
