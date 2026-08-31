@@ -292,6 +292,10 @@ def _natural_sort_key(key: str) -> list[int | str]:
 class GuidelineStore(ReadOnlyStore[Guideline]):
     """Hierarchical guideline sections keyed with dotted identifiers.
 
+    ``key in store`` is true only for stored leaf sections that ``store[key]`` can
+    return; title-only section keys are not members and raise ``KeyError`` on item
+    access.
+
     Examples:
         >>> item = Guideline("I_A_1", "I.A.1", "Example", "Body")
         >>> titles = {"I": "Section", "I.A": "Conventions"}
@@ -321,9 +325,6 @@ class GuidelineStore(ReadOnlyStore[Guideline]):
     def preambles(self) -> Mapping[str, str]:
         """Return text appearing before the first child of container sections."""
         return self._preambles
-
-    def __contains__(self, key: object) -> bool:
-        return key in self._values or key in self._titles
 
     def descendants(self, prefix: str) -> tuple[str, ...]:
         """Return naturally sorted leaf keys below a prefix."""
