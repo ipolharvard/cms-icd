@@ -37,6 +37,8 @@ class GEMSystemView:
             GEMDirection.ICD9_TO_ICD10: icd9_to_icd10,
             GEMDirection.ICD10_TO_ICD9: icd10_to_icd9,
         }
+        self._raw_stores: dict[tuple[MaterialProvider, GEMDirection], GEMStore] = {}
+        self._raw_stores_lock = Lock()
         self._locks = {direction: Lock() for direction in GEMDirection}
 
     @classmethod
@@ -70,20 +72,22 @@ class GEMSystemView:
                         raise RuntimeError(
                             f"{type(self).__name__} has no provider for unloaded GEMs"
                         )
-                    store = self._load_provider(self._provider, direction)
+                    store = self._load_raw_store(self._provider, direction)
                     if self._correction_providers:
                         stores = [store]
                         target_universes = [
                             set(
-                                self._load_provider(
+                                self._load_raw_store(
                                     self._provider, _opposite(direction)
                                 )
                             )
                         ]
                         for provider in self._correction_providers:
-                            stores.append(self._load_provider(provider, direction))
+                            stores.append(self._load_raw_store(provider, direction))
                             target_universes.append(
-                                set(self._load_provider(provider, _opposite(direction)))
+                                set(
+                                    self._load_raw_store(provider, _opposite(direction))
+                                )
                             )
                         if isinstance(self._provider, CMSProvider) and all(
                             isinstance(provider, CMSProvider)
@@ -103,6 +107,18 @@ class GEMSystemView:
                             store = _backport_corrections(stores, target_universes)
                     self._stores[direction] = store
         return store
+
+    def _load_raw_store(
+        self, provider: MaterialProvider, direction: GEMDirection
+    ) -> GEMStore:
+        """Return one provider's raw store, loading it at most once per view."""
+        key = (provider, direction)
+        with self._raw_stores_lock:
+            store = self._raw_stores.get(key)
+            if store is None:
+                store = self._load_provider(provider, direction)
+                self._raw_stores[key] = store
+            return store
 
     def _load_provider(
         self, provider: MaterialProvider, direction: GEMDirection
