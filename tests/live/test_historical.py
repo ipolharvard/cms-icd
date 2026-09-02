@@ -5,9 +5,9 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import guideline_fingerprint
+from conftest import catalog_entries, guideline_fingerprint
 
-from cms_icd import ICD10KnowledgeBase
+from cms_icd import GEMKnowledgeBase, ICD10KnowledgeBase
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -224,3 +224,28 @@ def test_april_snapshot_inherits_and_replaces_materials_per_system(
     )
     assert cm_manifest["release_date"] == "2025-10-01"
     assert pcs_manifest["release_date"] == "2026-04-01"
+
+
+@pytest.mark.live_cms
+@pytest.mark.live_historical
+def test_advertised_gem_releases_parse_for_every_system_and_direction(
+    historical_cache: Path,
+) -> None:
+    entries = catalog_entries()
+    gem_systems: dict[int, set[str]] = {}
+    for entry in entries:
+        if entry.material == "gems":
+            gem_systems.setdefault(entry.fiscal_year, set()).add(entry.system)
+    assert gem_systems, "CMS catalog advertises no GEM release"
+
+    for year in sorted(gem_systems):
+        gems = GEMKnowledgeBase.from_cms(
+            fiscal_year=year,
+            cache_dir=historical_cache,
+        )
+        for system in ("cm", "pcs"):
+            if system not in gem_systems[year]:
+                continue
+            view = gems.cm if system == "cm" else gems.pcs
+            for store in (view.icd9_to_icd10, view.icd10_to_icd9):
+                assert store

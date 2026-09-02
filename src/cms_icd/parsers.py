@@ -15,6 +15,7 @@ from operator import mul
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .constants import ICD10_PCS_CHARACTERS
 from .exceptions import ParseError
 from .models import Code, GEMDirection, GEMEntry, Node, Release, Term
 from .stores import GEMStore, IndexStore, TabularStore
@@ -28,6 +29,45 @@ _GEM_FILENAMES: dict[tuple[str, GEMDirection], tuple[str, ...]] = {
     ("cm", GEMDirection.ICD10_TO_ICD9): ("i10gem",),
     ("pcs", GEMDirection.ICD9_TO_ICD10): ("i9pcs",),
     ("pcs", GEMDirection.ICD10_TO_ICD9): ("pcsi9",),
+}
+
+# Official GEM files encode codes without dots or separators. Matching is
+# case-insensitive because a few official rows use lowercase letters.
+_ICD9_CM_DIAGNOSIS = re.compile(r"[VE]\d{2,4}|\d{3,5}")
+_ICD9_CM_PROCEDURE = re.compile(r"\d{3,4}")
+_ICD10_CM_DIAGNOSIS = re.compile(r"[A-Z]\d[A-Z0-9]{1,5}")
+_ICD10_PCS_CODE = re.compile(f"[{''.join(ICD10_PCS_CHARACTERS)}]{{7}}")
+
+# (source label, source layout, target label, target layout) for each
+# system and direction, per the documented official GEM file layout.
+_GEM_CODE_LAYOUTS: dict[
+    tuple[str, GEMDirection],
+    tuple[str, re.Pattern[str], str, re.Pattern[str]],
+] = {
+    ("cm", GEMDirection.ICD9_TO_ICD10): (
+        "ICD-9-CM diagnosis",
+        _ICD9_CM_DIAGNOSIS,
+        "ICD-10-CM diagnosis",
+        _ICD10_CM_DIAGNOSIS,
+    ),
+    ("cm", GEMDirection.ICD10_TO_ICD9): (
+        "ICD-10-CM diagnosis",
+        _ICD10_CM_DIAGNOSIS,
+        "ICD-9-CM diagnosis",
+        _ICD9_CM_DIAGNOSIS,
+    ),
+    ("pcs", GEMDirection.ICD9_TO_ICD10): (
+        "ICD-9-CM procedure",
+        _ICD9_CM_PROCEDURE,
+        "ICD-10-PCS",
+        _ICD10_PCS_CODE,
+    ),
+    ("pcs", GEMDirection.ICD10_TO_ICD9): (
+        "ICD-10-PCS",
+        _ICD10_PCS_CODE,
+        "ICD-9-CM procedure",
+        _ICD9_CM_PROCEDURE,
+    ),
 }
 
 
@@ -57,6 +97,9 @@ def parse_gems(
             f"found {[path.name for path in matches]}"
         )
 
+    source_label, source_pattern, target_label, target_pattern = _GEM_CODE_LAYOUTS[
+        (system, direction)
+    ]
     grouped: dict[str, list[GEMEntry]] = {}
     path = matches[0]
     try:
@@ -92,6 +135,16 @@ def parse_gems(
         # Some official reverse PCS releases encode NoI9 with 10000 rather than
         # setting the documented no-map bit. The sentinel is authoritative.
         no_map = no_map_flag or is_sentinel
+        if not source_pattern.fullmatch(source.upper()):
+            raise ParseError(
+                f"GEM source code {source!r} at {path}:{line_number} does not "
+                f"match the {source_label} layout"
+            )
+        if not is_sentinel and not target_pattern.fullmatch(raw_target.upper()):
+            raise ParseError(
+                f"GEM target code {raw_target!r} at {path}:{line_number} does not "
+                f"match the {target_label} layout"
+            )
         target = None if no_map else raw_target
         entry = GEMEntry(
             source=source,
@@ -287,9 +340,18 @@ def parse_cm_tabular(path: str | Path) -> TabularStore:
             f"Unable to parse ICD-10-CM tabular XML {path}: {exc}"
         ) from exc
 
+    expected_root = "ICD10CM.tabular"
+    if root.tag != expected_root:
+        raise ParseError(
+            f"Unexpected root element {root.tag!r} in {path}; "
+            f"expected {expected_root!r}"
+        )
+    chapters = root.findall("chapter")
+    if not chapters:
+        raise ParseError(f"CM tabular file {path} contains no chapters")
     drafts: dict[str, _NodeDraft] = {}
     _add_draft(drafts, _NodeDraft("cm", "cm"))
-    for chapter in root.findall("chapter"):
+    for chapter in chapters:
         chapter_name = chapter.findtext("name", "").strip()
         sections = chapter.findall("section")
         chapter_id = f"cm_{chapter_name}"
@@ -337,9 +399,18 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
             f"Unable to parse ICD-10-PCS tables XML {path}: {exc}"
         ) from exc
 
+    expected_root = "ICD10PCS.tabular"
+    if root.tag != expected_root:
+        raise ParseError(
+            f"Unexpected root element {root.tag!r} in {path}; "
+            f"expected {expected_root!r}"
+        )
+    tables = root.findall("pcsTable")
+    if not tables:
+        raise ParseError(f"PCS tables file {path} contains no tables")
     drafts: dict[str, _NodeDraft] = {}
     _add_draft(drafts, _NodeDraft("pcs", "pcs"))
-    for table_number, table in enumerate(root.findall("pcsTable"), start=1):
+    for table_number, table in enumerate(tables, start=1):
         table_axes: list[tuple[str, str, str]] = []
         for axis in table.findall("axis"):
             label = axis.find("label")
@@ -499,11 +570,12 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                 cells.append((column, value))
         code = (element.findtext("code") or "").strip() or None
         manifestation = (element.findtext("manif") or "").strip() or None
-        if code and "-" in code:
-            code = code.replace("-", "").rstrip(".")
-            assignable = False
-        else:
-            assignable = bool(code or manifestation)
+        # A range is not a code: keep the raw range instead of concatenating
+        # the endpoints, and make the term non-assignable.
+        has_range = (code is not None and "-" in code) or (
+            manifestation is not None and "-" in manifestation
+        )
+        assignable = bool(code or manifestation) and not has_range
         term_path = ", ".join(item for item in (parent_path, title) if item)
         children: list[str] = []
         drafts[identifier] = {
@@ -527,17 +599,16 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
             drafts[identifier]["assignable"] = False
             for column, value in cells:
                 cell_id = f"{identifier}X{column}"
-                cell_assignable = "-" not in value
-                cell_code = value.replace("-", "").rstrip(".")
+                cell_range = "-" in value
                 drafts[cell_id] = {
                     "id": cell_id,
                     "title": headings.get(column, f"Column {column}"),
                     "parent_id": identifier,
                     "children_ids": [],
                     "path": f"{term_path}, {headings.get(column, f'Column {column}')}",
-                    "code": cell_code,
+                    "code": value if cell_range else value.rstrip("."),
                     "manifestation_code": None,
-                    "assignable": cell_assignable,
+                    "assignable": not cell_range,
                     "see": None,
                     "see_also": None,
                     "source": source,
@@ -561,6 +632,12 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
             raise ParseError(
                 f"Unable to parse ICD-10-{system.upper()} index {path}: {exc}"
             ) from exc
+        expected_root = f"ICD10{system.upper()}.index"
+        if root.tag != expected_root:
+            raise ParseError(
+                f"Unexpected root element {root.tag!r} in {path}; "
+                f"expected {expected_root!r}"
+            )
         headings: dict[int, str] = {}
         for item in root.findall("indexHeading/head"):
             heading = (item.text or "").strip()
@@ -582,6 +659,8 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
         main_terms = root.findall(".//letter/mainTerm")
         if not main_terms:
             main_terms = root.findall(".//mainTerm")
+        if not main_terms:
+            raise ParseError(f"Index file {path} contains no terms")
         for element in main_terms:
             top_counter += 1
             identifier = f"{top_counter:06d}"
