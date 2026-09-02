@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING
 
-from cms_icd.knowledge_base import ICD10KnowledgeBase
-from cms_icd.models import Release
+import pytest
+
+from cms_icd.knowledge_base import ICD10CMKnowledgeBase, ICD10KnowledgeBase
+from cms_icd.models import Guideline, Release
 from cms_icd.sources import MaterialProvider
+from cms_icd.stores import GuidelineStore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,3 +49,33 @@ def test_tabular_access_loads_only_requested_system_and_material(
     assert provider.calls == [("cm", "tabular")]
     assert kb.cm["A00"].description == "Cholera"
     assert provider.calls == [("cm", "tabular")]
+
+
+def test_render_guidelines_cache_is_bounded_and_preserves_semantics() -> None:
+    sections = {
+        f"I.A.{number}": Guideline(
+            id=f"I_A_{number}",
+            number=f"I.A.{number}",
+            title=f"Title {number}",
+            content=f"Body {number}",
+        )
+        for number in range(1, 101)
+    }
+    cm = ICD10CMKnowledgeBase.from_stores(
+        guidelines=GuidelineStore(sections, {"I": "Roman", "I.A": "Letter"})
+    )
+
+    rendered = cm.render_guidelines(["I.A.5"])
+    assert rendered.id == "combined"
+    assert rendered.title == "Guidelines"
+    assert rendered.content == (
+        "# I: Roman\n\n## I.A: Letter\n\n### I.A.5: Title 5\n\nBody 5"
+    )
+    assert cm.render_guidelines(["I.A.5"]) is rendered
+
+    for number in range(1, 101):
+        assert f"Body {number}" in cm.render_guidelines([f"I.A.{number}"]).content
+    assert 0 < len(cm._render_cache) < 100
+
+    with pytest.raises(KeyError, match="MISSING"):
+        cm.render_guidelines(["MISSING"])

@@ -12,10 +12,20 @@ from tempfile import NamedTemporaryFile
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
-from .models import Code, GEMDirection, GEMEntry, GEMProvenance, Node, Release
-from .parsers import parse_cm_tabular, parse_gems, parse_pcs_tabular
+from .guidelines import parse_guidelines
+from .models import (
+    Code,
+    GEMDirection,
+    GEMEntry,
+    GEMProvenance,
+    Guideline,
+    Node,
+    Release,
+    Term,
+)
+from .parsers import parse_cm_tabular, parse_gems, parse_index, parse_pcs_tabular
 from .sources import CMSProvider, _directory_lock, _sha256
-from .stores import GEMStore, TabularStore
+from .stores import GEMStore, GuidelineStore, IndexStore, TabularStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -24,6 +34,8 @@ _CACHE_VERSION = "v1"
 _GEM_SCHEMA = "gem-store-v1"
 _CORRECTED_GEM_SCHEMA = "corrected-gem-store-v1"
 _TABULAR_SCHEMA = "tabular-store-v1"
+_GUIDELINE_SCHEMA = "guideline-store-v1"
+_INDEX_SCHEMA = "index-store-v1"
 _memory_lock = Lock()
 _memory: dict[tuple[str, str, str], Future[Any]] = {}
 
@@ -338,6 +350,98 @@ def load_tabular_store(provider: CMSProvider, system: str) -> TabularStore:
         decode=_tabular_from_payload,
         encode=_tabular_payload,
         build=lambda: parser(path),
+    )
+
+
+def _guideline_payload(store: GuidelineStore) -> dict[str, object]:
+    return {
+        "titles": dict(store.titles),
+        "preambles": dict(store.preambles),
+        "sections": [
+            {
+                "id": section.id,
+                "number": section.number,
+                "title": section.title,
+                "content": section.content,
+            }
+            for section in store.values()
+        ],
+    }
+
+
+def _guideline_from_payload(payload: object) -> GuidelineStore:
+    if not isinstance(payload, dict):
+        raise TypeError("Invalid cached guideline payload")
+    sections = {
+        str(record["number"]): Guideline(
+            id=str(record["id"]),
+            number=str(record["number"]),
+            title=str(record["title"]),
+            content=str(record["content"]),
+        )
+        for record in payload["sections"]
+    }
+    return GuidelineStore(
+        sections,
+        {str(key): str(value) for key, value in payload["titles"].items()},
+        {str(key): str(value) for key, value in payload["preambles"].items()},
+    )
+
+
+def load_guideline_store(provider: CMSProvider, system: str) -> GuidelineStore:
+    path = provider.paths(system, "guidelines")[0]
+    dependencies = {
+        "schema": _GUIDELINE_SCHEMA,
+        "release": _release_payload(provider.release),
+        "system": system,
+        "file": [path.name, _sha256(path)],
+    }
+    key = _key(dependencies)
+    return _load_or_build(
+        provider.cache_dir,
+        "guidelines",
+        key,
+        _GUIDELINE_SCHEMA,
+        decode=_guideline_from_payload,
+        encode=_guideline_payload,
+        build=lambda: parse_guidelines(path, system=system),
+    )
+
+
+def _index_payload(store: IndexStore) -> dict[str, object]:
+    return {"terms": [term.to_dict() for term in store.values()]}
+
+
+def _index_from_payload(payload: object) -> IndexStore:
+    if not isinstance(payload, dict):
+        raise TypeError("Invalid cached index payload")
+    values: dict[str, Term] = {}
+    for record in payload["terms"]:
+        value = dict(record)
+        value["children_ids"] = tuple(value.get("children_ids") or ())
+        value["optional_modifiers"] = tuple(value.get("optional_modifiers") or ())
+        term = Term(**value)
+        values[term.id] = term
+    return IndexStore(values)
+
+
+def load_index_store(provider: CMSProvider, system: str) -> IndexStore:
+    paths = provider.paths(system, "index")
+    dependencies = {
+        "schema": _INDEX_SCHEMA,
+        "release": _release_payload(provider.release),
+        "system": system,
+        "files": _path_fingerprints(paths),
+    }
+    key = _key(dependencies)
+    return _load_or_build(
+        provider.cache_dir,
+        "index",
+        key,
+        _INDEX_SCHEMA,
+        decode=_index_from_payload,
+        encode=_index_payload,
+        build=lambda: parse_index(paths, system=system),
     )
 
 
