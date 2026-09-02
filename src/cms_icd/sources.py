@@ -206,10 +206,19 @@ def refresh_cms_catalog(*, cache_dir: str | Path | None = None) -> None:
     )
 
 
-def _clear_catalog_memory_cache() -> None:
-    """Clear process-local catalog state for tests and diagnostics."""
+def clear_catalog_memory_cache() -> None:
+    """Clear process-local catalog cache entries.
+
+    Shared catalog entries are retained per cache directory for the lifetime of the
+    process. Call this function to release them, for example after using a per-use
+    temporary cache directory, so distinct directories do not accumulate catalog state
+    indefinitely.
+    """
     with _catalog_lock:
         _catalog_cache.clear()
+
+
+_clear_catalog_memory_cache = clear_catalog_memory_cache
 
 
 def fiscal_year_for(value: date) -> int:
@@ -343,6 +352,15 @@ class DirectoryProvider(MaterialProvider):
         self.release = release
 
     def paths(self, system: str, material: str) -> tuple[Path, ...]:
+        if (system, material) not in _PATTERNS:
+            supported = ", ".join(
+                repr((entry_system, entry_material))
+                for entry_system, entry_material in _PATTERNS
+            )
+            raise ValueError(
+                f"Unsupported (system, material) pair: {(system, material)!r}. "
+                f"Supported pairs: {supported}"
+            )
         patterns = _PATTERNS[(system, material)]
         matches = tuple(
             sorted(

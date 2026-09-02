@@ -193,6 +193,21 @@ when the block exits. `offline=True` has different semantics: it prohibits
 network access and requires the selected catalog and artifacts to exist in the
 chosen cache directory.
 
+The in-memory caches follow the same process-lifetime rule: shared catalog
+entries are retained per cache directory, and parsed stores are retained per
+derived entry, until the process exits or the application releases them. When
+cycling through distinct cache directories, such as per-use temporary
+directories, release that state explicitly:
+
+```python
+from cms_icd import clear_catalog_memory_cache, clear_memory_cache
+
+clear_catalog_memory_cache()
+clear_memory_cache()
+```
+
+Releasing in-memory state does not modify the persistent cache files.
+
 The downloaded catalog is also persistent and is reused until explicitly
 refreshed. This keeps repeated pipelines from downloading and parsing CMS
 catalog HTML even when they do not set `offline=True`. Refresh it when newly

@@ -342,6 +342,11 @@ def load_tabular_store(provider: CMSProvider, system: str) -> TabularStore:
 
 
 def clear_memory_cache() -> None:
-    """Clear process-local parsed-store state for tests and diagnostics."""
+    """Clear process-local parsed-store cache entries.
+
+    Parsed stores are retained per cache directory for the lifetime of the process. Call
+    this function to release them, for example after using a per-use temporary cache
+    directory, so distinct directories do not accumulate parsed stores indefinitely.
+    """
     with _memory_lock:
         _memory.clear()
