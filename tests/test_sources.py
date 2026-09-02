@@ -15,7 +15,7 @@ from zipfile import ZipFile
 import pytest
 import requests
 
-from cms_icd import ICD10KnowledgeBase
+from cms_icd import ICD10KnowledgeBase, clear_catalog_memory_cache
 from cms_icd.exceptions import (
     AmbiguousReleaseError,
     DownloadError,
@@ -25,8 +25,10 @@ from cms_icd.exceptions import (
 from cms_icd.models import Release
 from cms_icd.sources import (
     _LOCK_MARKER_NAME,
+    CMS_CATALOG_URL,
     CMSProvider,
     DirectoryProvider,
+    _catalog_cache,
     _clear_catalog_memory_cache,
     _directory_lock,
     _reclaim_stale_lock,
@@ -745,3 +747,60 @@ def test_from_cms_and_for_date_reject_unknown_fallback() -> None:
             )
         with pytest.raises(ValueError, match="fallback"):
             ICD10KnowledgeBase.for_date(date(2026, 2, 1), fallback=value)
+
+
+def test_distinct_catalog_cache_directories_are_evictable(tmp_path: Path) -> None:
+    release = Release(2026, date(2025, 10, 1))
+    clear_catalog_memory_cache()
+    assert len(_catalog_cache) == 0
+
+    providers = []
+    for index in range(3):
+        cache_dir = tmp_path / f"cache-{index}"
+        cache_dir.mkdir()
+        (cache_dir / "catalog.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "system": "cm",
+                        "material": "tabular",
+                        "fiscal_year": 2026,
+                        "release_date": "2025-10-01",
+                        "label": "2026 Code Tables, Tabular and Index (ZIP)",
+                        "url": "https://www.cms.gov/files/zip/2026-code-tables.zip",
+                        "page_url": CMS_CATALOG_URL,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        provider = CMSProvider(release, cache_dir=cache_dir, offline=True)
+        assert provider._load_catalog()
+        providers.append(provider)
+
+    assert len(_catalog_cache) == 3
+
+    providers[0].cache_dir.joinpath("catalog.json").unlink()
+    warm = CMSProvider(release, cache_dir=providers[0].cache_dir, offline=True)
+    assert warm._load_catalog()
+
+    clear_catalog_memory_cache()
+    assert len(_catalog_cache) == 0
+
+    reloaded = CMSProvider(release, cache_dir=providers[1].cache_dir, offline=True)
+    assert reloaded._load_catalog()
+    assert len(_catalog_cache) == 1
+
+
+def test_directory_provider_rejects_unsupported_pairs(tmp_path: Path) -> None:
+    provider = DirectoryProvider(tmp_path, Release(2026, date(2025, 10, 1)))
+
+    with pytest.raises(ValueError) as invalid_system:
+        provider.paths("dx", "tabular")
+    message = str(invalid_system.value)
+    assert "('dx', 'tabular')" in message
+    assert "('cm', 'tabular')" in message
+
+    with pytest.raises(ValueError) as invalid_material:
+        provider.paths("cm", "tabular2")
+    assert "('cm', 'tabular2')" in str(invalid_material.value)
