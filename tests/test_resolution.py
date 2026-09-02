@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from datetime import date
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from cms_icd.resolution import (
     _resolution_cache,
     _resolve_cm_mapping,
     _resolve_pcs_mapping,
+    clear_resolution_memory_cache,
 )
 from cms_icd.sources import CatalogEntry
 from cms_icd.stores import TabularStore
@@ -561,6 +563,47 @@ def test_bulk_and_single_year_cm_apis_share_resolution(
     assert single["0020"].target_codes == ("A70",)
     with pytest.raises(TypeError):
         bulk[2019] = single  # type: ignore[index]
+
+
+def test_fingerprintless_store_keys_are_stable_under_object_lifetime(
+    monkeypatch: pytest.MonkeyPatch, tabular: TabularStore
+) -> None:
+    release = Release(2018, date(2017, 10, 1))
+    knowledge = SimpleNamespace(cm=SimpleNamespace(tabular=tabular))
+    holder: dict[int, GEMStore] = {}
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **kwargs: SimpleNamespace(
+            cm=SimpleNamespace(icd9_to_icd10=holder[kwargs["fiscal_year"]])
+        ),
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution.ICD10KnowledgeBase.from_cms", lambda **_: knowledge
+    )
+    clear_resolution_memory_cache()
+
+    holder[2017] = GEMStore(
+        {"0020": (_entry("0020", "A70"),)},
+        system="cm",
+        direction=GEMDirection.ICD9_TO_ICD10,
+        release=release,
+    )
+    first = resolve_icd9_to_icd10_cm_mapping(fiscal_year=2017)
+    retained = weakref.ref(holder[2017])
+    del holder[2017]
+    holder[2017] = GEMStore(
+        {"0020": (_entry("0020", "S12"),)},
+        system="cm",
+        direction=GEMDirection.ICD9_TO_ICD10,
+        release=release,
+    )
+    second = resolve_icd9_to_icd10_cm_mapping(fiscal_year=2017)
+
+    assert first["0020"].target_codes == ("A70",)
+    assert second["0020"].target_codes == ("S12",)
+    assert second is not first
+    assert retained() is not None
+    assert len(_resolution_cache) == 2
 
 
 def test_empty_bulk_request_does_not_load_materials(
