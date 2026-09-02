@@ -105,6 +105,44 @@ def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) ->
     assert child.path == "Hypertension, secondary"
 
 
+INDEX_XML_WITH_CELLS = """\
+<ICD10CM.index>
+  <letter>
+    <title>F</title>
+    <mainTerm>
+      <title>Fever</title>
+      <cell col="1">R50.9</cell>
+      <term>
+        <title>with rash</title>
+        <cell col="1">R05.9</cell>
+        <term>
+          <title>chronic</title>
+          <cell col="2">R69.0</cell>
+        </term>
+      </term>
+    </mainTerm>
+  </letter>
+</ICD10CM.index>
+"""
+
+
+def test_main_term_id_resolves_cells_at_any_depth(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_XML_WITH_CELLS)
+    store = parse_index((path,), system="cm")
+
+    main = store.main_terms()[0]
+    assert {term.id for term in store.values()} == {
+        "000001",
+        "000001X1",
+        "000001.0",
+        "000001.0X1",
+        "000001.0.0",
+        "000001.0.0X2",
+    }
+    assert all(term.main_term_id == main.id for term in store.values())
+
+
 class _MediaBox:
     height = 1_000
 
