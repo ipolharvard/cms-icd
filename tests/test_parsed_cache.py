@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cms_icd import GEMDirection, GEMEntry, GEMStore
+from cms_icd import GEMDirection, GEMEntry, GEMStore, clear_memory_cache
 from cms_icd.gems import _backport_corrections
 from cms_icd.models import Node, Release
 from cms_icd.parsed_cache import (
-    clear_memory_cache,
+    _memory,
     load_corrected_gem_store,
     load_gem_store,
     load_tabular_store,
@@ -131,3 +131,38 @@ def test_corrected_store_cache_preserves_provenance(tmp_path: Path) -> None:
 
     assert second["0010"] == first["0010"]
     assert second.provenance("0010") == first.provenance("0010")
+
+
+def test_distinct_cache_directories_are_evictable_and_warm_reuse_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clear_memory_cache()
+    assert len(_memory) == 0
+
+    providers = []
+    stores = []
+    for index in range(3):
+        gem_path = tmp_path / f"2018_I9gem_{index}.txt"
+        gem_path.write_text("0010 A000 10000\n", encoding="ascii")
+        provider = _provider(tmp_path / f"cache-{index}", (gem_path,))
+        providers.append(provider)
+        stores.append(load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10))
+
+    assert len(_memory) == 3
+
+    for entry in (providers[0].cache_dir / "_derived" / "v1" / "gems").iterdir():
+        (entry / "payload.json").write_text("corrupt", encoding="utf-8")
+    monkeypatch.setattr(
+        "cms_icd.parsed_cache.parse_gems",
+        lambda *_args, **_kwargs: pytest.fail("warm cache invoked GEM parser"),
+    )
+
+    again = load_gem_store(providers[0], "cm", GEMDirection.ICD9_TO_ICD10)
+    assert again is stores[0]
+
+    clear_memory_cache()
+    assert len(_memory) == 0
+
+    reloaded = load_gem_store(providers[1], "cm", GEMDirection.ICD9_TO_ICD10)
+    assert reloaded["0010"] == stores[1]["0010"]
+    assert len(_memory) == 1
