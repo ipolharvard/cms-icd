@@ -34,7 +34,27 @@ if TYPE_CHECKING:
 _PCS_UNKNOWN_AXIS = "?"
 _PCS_CHARACTERS = frozenset(ICD10_PCS_CHARACTERS)
 _resolution_lock = Lock()
-_resolution_cache: dict[tuple[str, str, str | None], Future[Mapping[str, Any]]] = {}
+
+
+class _StoreIdentityKey:
+    """A hashable, identity-keyed handle for a store lacking a content fingerprint.
+
+    The resolution cache and identity registry retain the handle, and through it the
+    store, so the store's memory address cannot be reused by a distinct store while a
+    cache entry exists.
+    """
+
+    __slots__ = ("store",)
+
+    def __init__(self, store: object) -> None:
+        self.store = store
+
+
+_store_identity_keys: dict[int, tuple[object, _StoreIdentityKey]] = {}
+_resolution_cache: dict[
+    tuple[str, str | _StoreIdentityKey, str | _StoreIdentityKey | None],
+    Future[Mapping[str, Any]],
+] = {}
 
 
 def _unmappable_cm(
@@ -424,19 +444,32 @@ def _normalize_years(
     return years
 
 
+def _key_component(store: object) -> str | _StoreIdentityKey:
+    """Return the cache key component for one store.
+
+    A content fingerprint, when present, is the key; otherwise a stable identity handle
+    is used so that two distinct stores can never share an entry.
+    """
+    fingerprint = getattr(store, "_cache_fingerprint", None)
+    if fingerprint is not None:
+        return str(fingerprint)
+    candidate = _store_identity_keys.get(id(store))
+    if candidate is not None and candidate[0] is store:
+        return candidate[1]
+    handle = _StoreIdentityKey(store)
+    _store_identity_keys[id(store)] = (store, handle)
+    return handle
+
+
 def _resolved_year(
     kind: Literal["cm", "pcs"],
     store: GEMStore,
     tabular: TabularStore | None,
 ) -> Mapping[str, ICDCMMappingResolution] | Mapping[str, ICDPCSMappingResolution]:
-    store_key = str(getattr(store, "_cache_fingerprint", id(store)))
-    tabular_key = (
-        None
-        if tabular is None
-        else str(getattr(tabular, "_cache_fingerprint", id(tabular)))
-    )
-    key = (kind, store_key, tabular_key)
     with _resolution_lock:
+        store_key = _key_component(store)
+        tabular_key = None if tabular is None else _key_component(tabular)
+        key = (kind, store_key, tabular_key)
         future = _resolution_cache.get(key)
         if future is None:
             future = Future()
@@ -584,3 +617,4 @@ def clear_resolution_memory_cache() -> None:
     """Clear process-local resolution state for tests and diagnostics."""
     with _resolution_lock:
         _resolution_cache.clear()
+        _store_identity_keys.clear()

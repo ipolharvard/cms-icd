@@ -342,6 +342,9 @@ def load_tabular_store(provider: CMSProvider, system: str) -> TabularStore:
 
 
 def clear_memory_cache() -> None:
-    """Clear process-local parsed-store state for tests and diagnostics."""
+    """Clear process-local parsed-store and resolution-cache state."""
+    from .resolution import clear_resolution_memory_cache
+
     with _memory_lock:
         _memory.clear()
+    clear_resolution_memory_cache()
