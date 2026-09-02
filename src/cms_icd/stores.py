@@ -28,6 +28,11 @@ T = TypeVar("T")
 class ReadOnlyStore[T](Mapping[str, T]):
     """A deterministic read-only mapping.
 
+    Equality is value-based: two stores are equal when they are the same store
+    class with equal items and equal store-identifying metadata (see each
+    subclass), so a store is never equal to a bare mapping holding the same
+    items. Value-based equality makes instances deliberately not hashable.
+
     Examples:
         >>> store = ReadOnlyStore({"b": 2, "a": 1})
         >>> list(store)
@@ -35,6 +40,8 @@ class ReadOnlyStore[T](Mapping[str, T]):
         >>> store["a"]
         1
     """
+
+    __hash__ = None
 
     def __init__(self, values: Mapping[str, T]) -> None:
         self._values = MappingProxyType(dict(values))
@@ -47,6 +54,11 @@ class ReadOnlyStore[T](Mapping[str, T]):
 
     def __len__(self) -> int:
         return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        return self._values == other._values
 
 
 class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
@@ -88,6 +100,17 @@ class GEMStore(ReadOnlyStore[tuple[GEMEntry, ...]]):
         self._mapping_lock = Lock()
         self._default_provenance = (
             GEMProvenance(release, release, release) if release is not None else None
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        return (
+            self._values == other._values
+            and self.system == other.system
+            and self.direction == other.direction
+            and self.release == other.release
+            and self._provenance == other._provenance
         )
 
     def mapping(self, source: str) -> GEMMapping:
@@ -170,6 +193,15 @@ class TabularStore(ReadOnlyStore[Node]):
         self._roots = tuple(roots)
         self._parents_cache: dict[str, tuple[Node, ...]] = {}
         self._parents_lock = Lock()
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        return (
+            self._values == other._values
+            and self._code_lookup == other._code_lookup
+            and self._roots == other._roots
+        )
 
     def _node_id(self, code_or_id: str) -> str:
         if code_or_id in self._code_lookup:
@@ -315,6 +347,15 @@ class GuidelineStore(ReadOnlyStore[Guideline]):
         super().__init__(values)
         self._titles = MappingProxyType(dict(titles or {}))
         self._preambles = MappingProxyType(dict(preambles or {}))
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        return (
+            self._values == other._values
+            and self._titles == other._titles
+            and self._preambles == other._preambles
+        )
 
     @property
     def titles(self) -> Mapping[str, str]:
