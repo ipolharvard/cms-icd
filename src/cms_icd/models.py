@@ -254,7 +254,7 @@ class Term(Record):
     @property
     def main_term_id(self) -> str:
         """Return the identifier of this term's top-level main term."""
-        return self.id.split(".", maxsplit=1)[0]
+        return self.id.rsplit("X", 1)[0].split(".", maxsplit=1)[0]
 
 
 @dataclass(frozen=True, slots=True)
