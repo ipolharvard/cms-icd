@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
+import threading
 from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
 
+import cms_icd.gems as gems_module
 from cms_icd import (
     ICD10_PCS_CHARACTERS,
     GEMDirection,
@@ -73,6 +76,58 @@ def test_gem_knowledge_base_loads_systems_and_directions_lazily(
     assert "icd9_to_icd10" in repr(gems.cm)
     assert gems.cm.icd10_to_icd9["A001"][0].target is None
     assert gems.pcs.icd10_to_icd9["0ABC0ZZ"][0].target == "0010"
+
+
+def test_gem_view_creation_is_race_free(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_gems(tmp_path)
+    gems = GEMKnowledgeBase.from_directory(tmp_path, fiscal_year=2018)
+
+    loads: list[tuple[str, GEMDirection]] = []
+    parse = gems_module.parse_gems
+
+    def counting_parse(
+        paths: tuple[Path, ...],
+        *,
+        system: str,
+        direction: GEMDirection,
+        release: Release | None = None,
+    ) -> GEMStore:
+        loads.append((system, direction))
+        return parse(paths, system=system, direction=direction, release=release)
+
+    monkeypatch.setattr(gems_module, "parse_gems", counting_parse)
+
+    cm_views: list[object] = []
+    pcs_views: list[object] = []
+    barrier = threading.Barrier(2)
+
+    def worker() -> None:
+        barrier.wait()
+        cm_view = gems.cm
+        pcs_view = gems.pcs
+        cm_views.append(cm_view)
+        pcs_views.append(pcs_view)
+        _ = cm_view.icd9_to_icd10
+        _ = pcs_view.icd9_to_icd10
+
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-4)
+    try:
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    assert cm_views[0] is cm_views[1]
+    assert pcs_views[0] is pcs_views[1]
+    assert loads.count(("cm", GEMDirection.ICD9_TO_ICD10)) == 1
+    assert loads.count(("pcs", GEMDirection.ICD9_TO_ICD10)) == 1
 
 
 def test_parse_reverse_pcs_no_map_uses_icd9_sentinel(tmp_path: Path) -> None:
