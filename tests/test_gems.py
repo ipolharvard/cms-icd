@@ -16,6 +16,7 @@ from cms_icd.exceptions import ParseError
 from cms_icd.gems import _backport_corrections
 from cms_icd.models import Node, Release
 from cms_icd.parsers import parse_gems
+from cms_icd.sources import DirectoryProvider
 from cms_icd.stores import TabularStore
 
 if TYPE_CHECKING:
@@ -280,3 +281,106 @@ def test_parse_gems_rejects_invalid_records(tmp_path: Path, record: str) -> None
             system="cm",
             direction=GEMDirection.ICD9_TO_ICD10,
         )
+
+
+def test_corrected_view_loads_raw_store_once_per_provider_direction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_dir = tmp_path / "fy2016"
+    correction_dir = tmp_path / "fy2017"
+    for directory, year, i9gem, i10gem in (
+        (
+            base_dir,
+            2016,
+            "0010 A000 10000\n",
+            "A000 0010 10000\nA001 0011 10000\n",
+        ),
+        (
+            correction_dir,
+            2017,
+            "0010 A001 10000\n",
+            "A000 0010 10000\nA001 0010 10000\n",
+        ),
+    ):
+        directory.mkdir()
+        (directory / f"{year}_I9gem.txt").write_text(i9gem, encoding="ascii")
+        (directory / f"{year}_I10gem.txt").write_text(i10gem, encoding="ascii")
+
+    base_provider = DirectoryProvider(base_dir, Release(2016, date(2015, 10, 1)))
+    correction_provider = DirectoryProvider(
+        correction_dir, Release(2017, date(2016, 10, 1))
+    )
+
+    def raw_store(provider: DirectoryProvider, direction: GEMDirection) -> GEMStore:
+        return parse_gems(
+            provider.paths("cm", "gems"),
+            system="cm",
+            direction=direction,
+            release=provider.release,
+        )
+
+    expected_forward = _backport_corrections(
+        [
+            raw_store(base_provider, GEMDirection.ICD9_TO_ICD10),
+            raw_store(correction_provider, GEMDirection.ICD9_TO_ICD10),
+        ],
+        [
+            set(raw_store(base_provider, GEMDirection.ICD10_TO_ICD9)),
+            set(raw_store(correction_provider, GEMDirection.ICD10_TO_ICD9)),
+        ],
+    )
+    expected_backward = _backport_corrections(
+        [
+            raw_store(base_provider, GEMDirection.ICD10_TO_ICD9),
+            raw_store(correction_provider, GEMDirection.ICD10_TO_ICD9),
+        ],
+        [
+            set(raw_store(base_provider, GEMDirection.ICD9_TO_ICD10)),
+            set(raw_store(correction_provider, GEMDirection.ICD9_TO_ICD10)),
+        ],
+    )
+
+    counts: dict[tuple[int, GEMDirection], int] = {}
+
+    def counting_parse_gems(
+        paths: tuple[Path, ...],
+        *,
+        system: str,
+        direction: GEMDirection,
+        release: Release | None = None,
+    ) -> GEMStore:
+        key = (release.fiscal_year, direction)
+        counts[key] = counts.get(key, 0) + 1
+        return parse_gems(paths, system=system, direction=direction, release=release)
+
+    monkeypatch.setattr("cms_icd.gems.parse_gems", counting_parse_gems)
+
+    kb = GEMKnowledgeBase(base_provider, correction_providers=(correction_provider,))
+    forward = kb.cm.icd9_to_icd10
+    backward = kb.cm.icd10_to_icd9
+    assert kb.cm.icd9_to_icd10 is forward
+    assert kb.cm.icd10_to_icd9 is backward
+
+    assert sum(counts.values()) == 4
+    assert counts == {
+        (2016, GEMDirection.ICD9_TO_ICD10): 1,
+        (2016, GEMDirection.ICD10_TO_ICD9): 1,
+        (2017, GEMDirection.ICD9_TO_ICD10): 1,
+        (2017, GEMDirection.ICD10_TO_ICD9): 1,
+    }
+
+    for actual, expected in (
+        (forward, expected_forward),
+        (backward, expected_backward),
+    ):
+        assert actual.system == expected.system
+        assert actual.direction == expected.direction
+        assert actual.release == expected.release
+        assert list(actual) == list(expected)
+        for source in expected:
+            assert actual[source] == expected[source]
+            assert actual.provenance(source) == expected.provenance(source)
+
+    assert forward["0010"][0].target == "A001"
+    assert forward.provenance("0010").selected_mapping_release.fiscal_year == 2017
