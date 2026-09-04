@@ -102,6 +102,23 @@ def _strip_header(title: str, content: str) -> str:
     ).strip()
 
 
+def _strip_leaf_header(title: str, content: str) -> str:
+    """Remove a leaf section's own heading from the start of its content.
+
+    The heading is matched with optional whitespace between every character, mirroring
+    the outline-heading position search, because PDF text extraction may insert extra
+    spaces inside the heading text.
+    """
+    characters = "".join(title.split())
+    if not characters:
+        return content
+    pattern = re.compile(
+        r"^.*?" + r"\s*".join(re.escape(character) for character in characters),
+        re.I | re.S,
+    )
+    return pattern.sub("", content, count=1).strip()
+
+
 def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> GuidelineStore:
     entries: list[dict[str, object]] = []
     current_section: str | None = None
@@ -179,7 +196,7 @@ def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> Guidelin
                 id=key.replace(".", "_"),
                 number=key,
                 title=str(entry["title"]),
-                content=content,
+                content=_strip_leaf_header(str(entry["title"]), content),
             )
         else:
             body = _strip_header(str(entry["title"]), content)

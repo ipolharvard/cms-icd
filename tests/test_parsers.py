@@ -9,10 +9,14 @@ from cms_icd.exceptions import ParseError
 from cms_icd.guidelines import (
     _outline_entries,
     _page_text,
+    _structured_cm_guidelines,
     _text_position,
     parse_guidelines,
 )
+from cms_icd.knowledge_base import ICD10CMKnowledgeBase
+from cms_icd.models import Code, Node
 from cms_icd.parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
+from cms_icd.stores import TabularStore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,6 +157,38 @@ class _Reader:
         return destination.page
 
 
+class _GuidelinePage:
+    """A guideline page whose extracted text is fully controlled by a test."""
+
+    mediabox = _MediaBox()
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def extract_text(self, *, visitor_text):
+        return self._text
+
+
+class _GuidelineReader:
+    def __init__(self, pages: list[_GuidelinePage]) -> None:
+        self.outline = [
+            _Destination("Section I. Conventions", 0),
+            [
+                _Destination("A. Basic conventions", 1),
+                [
+                    _Destination("1. First rule", 1),
+                    _Destination("2. Second rule", 1),
+                ],
+                _Destination("C. Coding rules", 1),
+                [_Destination("9. Ninth rule", 1)],
+            ],
+        ]
+        self.pages = pages
+
+    def get_destination_page_number(self, destination: _Destination) -> int:
+        return destination.page
+
+
 def test_guideline_page_text_removes_only_positioned_footer() -> None:
     text = _page_text(_Page())  # type: ignore[arg-type]
 
@@ -187,3 +223,51 @@ def test_cm_guideline_parser_requires_structured_outline(tmp_path: Path) -> None
 def test_guideline_parser_rejects_unknown_system(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unsupported guideline system"):
         parse_guidelines(tmp_path / "unused.pdf", system="icd9")
+
+
+def test_cm_guideline_leaf_content_excludes_its_own_heading() -> None:
+    pages = (
+        _GuidelinePage(
+            "Section I. Conventions\nIntroductory text for the conventions section.\n"
+        ),
+        _GuidelinePage(
+            "A. Basic conventions\n"
+            "1. First rule\n"
+            "Body of first rule.\n"
+            "2. Second rule\n"
+            "Body of second rule.\n"
+            "C. Coding rules\n"
+            "9. Ninth rule\n"
+            "Body of ninth rule.\n"
+        ),
+    )
+    reader = _GuidelineReader(list(pages))
+    store = _structured_cm_guidelines(
+        reader,
+        "guidelines.pdf",  # type: ignore[arg-type]
+    )
+
+    assert store["I.A.1"].content == "Body of first rule."
+    assert store["I.A.2"].content == "Body of second rule."
+    assert store["I.C.9"].content == "Body of ninth rule."
+    assert store.preambles["I"] == "Introductory text for the conventions section."
+
+    cm = ICD10CMKnowledgeBase.from_stores(guidelines=store)
+    rendered = cm.render_guidelines(["I.A.1"]).content
+    assert rendered.count("### I.A.1: First rule") == 1
+    assert "1. First rule" not in rendered
+    assert rendered.count("First rule") == 1
+
+    root = Node("cm", "cm", children_ids=("cm_9",))
+    chapter = Node("cm_9", "9", parent_id="cm")
+    code = Code("I10", "I10", "Essential hypertension", parent_id="cm_9")
+    tabular = TabularStore(
+        {"cm": root, "cm_9": chapter, "I10": code},
+        {"I10": "I10"},
+        ("cm",),
+    )
+    chapter_cm = ICD10CMKnowledgeBase.from_stores(tabular=tabular, guidelines=store)
+    chapter_rendered = chapter_cm.get_chapter_guidelines(["I10"]).content
+    assert chapter_rendered.count("### I.C.9: Ninth rule") == 1
+    assert "9. Ninth rule" not in chapter_rendered
+    assert chapter_rendered.count("Ninth rule") == 1

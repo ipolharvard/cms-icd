@@ -30,10 +30,16 @@ EXPECTED_SHA256 = {
     ),
 }
 
+# Compatibility note (2026-08-29): the CM guideline fingerprints changed
+# deliberately with a parser-semantics fix (reproducibility rules): CM
+# guideline leaf content no longer includes the section's own heading line,
+# which was previously duplicated next to the Markdown header in rendered
+# output. PCS guideline behavior is unchanged, so the PCS fingerprints are
+# identical to their previous values.
 EXPECTED_GUIDELINE_FINGERPRINTS = {
-    (2019, "cm"): "933c07214242df3fffa1fcc94588a161d9708b74e47c35db9553e776e6142d38",
+    (2019, "cm"): "d94d6892caaa14956faf7129338ce69ddb5a4c370b5393bc150bff216fe90b42",
     (2019, "pcs"): "681a7ac9511cf060ba40957513143ec403b9e3e5148993c9cecd21ea1b92914f",
-    (2026, "cm"): "58793aeb92d51ebea48da1151d2e2fa6670a8e80eedd7d1734c2f779d1fd654b",
+    (2026, "cm"): "348eaf72498cb9555e4b5504672ef50f3581670d9cc6dec960f3e22f61a0abf8",
     (2026, "pcs"): "d9a30d9cde9c40d0f69252a88817113b5ef64f6ca7e6392047f0a49c2fbee701",
 }
 
