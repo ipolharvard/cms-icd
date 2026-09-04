@@ -1,50 +1,34 @@
 # Repository Instructions
 
-## Python Commands
+## Project Commands
 
-Use the repository virtual environment at `.venv` for Python checks and tests.
-Dependency management uses `uv`; do not create an environment or add, remove, or
-change dependencies without explicit approval.
-
-Prefer the repository Makefile targets for common tasks:
+Prefer these repository Makefile targets for their corresponding operations:
 
 ```bash
-make install-dev
-make install-docs
 make test
 make docs
-make test-live
 ```
 
-Use `make clean` to remove generated build, documentation, test, and cache files.
-It preserves `data/`, `.venv/`, source files, and untracked user files.
+When dependency setup is approved, use `make install-dev` or
+`make install-docs`. When cleanup is requested, use `make clean`; it preserves
+`data/`, `.venv/`, source files, and untracked user files.
 
-Examples:
+For a focused test, use:
 
 ```bash
-.venv/bin/python -m pytest ...
-.venv/bin/pre-commit run --files ...
+uv run pytest -q --tb=line <test-group>
 ```
-
-If a dependency is missing, report it clearly and suggest the appropriate `uv`
-or Makefile command instead of installing or changing dependencies automatically.
 
 ## Validation
 
-After editing files, run the fastest relevant validation for the touched
-behavior.
-
-Preferred checks include targeted unit tests, import checks, syntax checks,
-strict documentation builds, and pre-commit on touched files:
+Use targeted unit tests, import checks, syntax checks, and strict documentation
+builds as appropriate for the change. Use the broader targets when their whole
+responsibility is affected:
 
 ```bash
-.venv/bin/pre-commit run --files <touched-files>
 make test
 make docs
 ```
-
-If validation cannot be run because a tool or dependency is unavailable, say
-what failed and what command the user can run after fixing the environment.
 
 ## CMS Integration Tests
 
@@ -56,7 +40,7 @@ Do not run `make test-live` as part of routine validation. When live testing is
 requested, keep output compact:
 
 ```bash
-.venv/bin/python -m pytest -q --tb=line -m live_cms tests/live
+uv run pytest -q --tb=line -m live_cms tests/live
 ```
 
 Use the narrower targets when only one external contract needs validation:
@@ -99,23 +83,3 @@ research results.
 
 When such a change is requested, explain its compatibility and reproducibility
 impact and add focused tests and documentation.
-
-## Commit Messages
-
-Use a concise, clear title that summarizes the overall change. When more
-context is useful, add a blank-line-separated body with a few bullets covering
-the major behavior or capability changes. Avoid exhaustive file lists and
-low-level implementation detail.
-
-```text
-Add GitHub Pages documentation
-
-- Document release selection, caching, and custom sources
-- Generate API references from public docstrings
-- Validate and deploy the site through GitHub Actions
-```
-
-## Safety
-
-Do not read secret-bearing files such as `.env`, `.env.*`, or `.envrc`.
-Do not delete cached CMS materials or generated artifacts without approval.

@@ -1,4 +1,22 @@
 /.venv
+
+# Local environment and secret-bearing configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+.envrc
+.direnv/
+.netrc
+.npmrc
+.pypirc
+credentials.*
+secrets.*
+*.key
+*.pem
+*.p12
+*.pfx
+
 __pycache__/
 *.py[cod]
 *.egg-info/
