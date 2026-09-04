@@ -45,6 +45,7 @@ nav:
       - Records: reference/models.md
       - Stores: reference/stores.md
       - Sources: reference/sources.md
+      - Caches: reference/caches.md
       - Exceptions: reference/exceptions.md
   - Testing CMS compatibility: testing.md
   - Development: development.md
