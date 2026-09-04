@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from datetime import date
 from threading import Lock
 from typing import TYPE_CHECKING, Self
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_RENDER_CACHE_MAX = 32
 
 
 class _SystemKnowledgeBase:
@@ -40,7 +43,7 @@ class _SystemKnowledgeBase:
         self._tabular_lock = Lock()
         self._index_lock = Lock()
         self._guidelines_lock = Lock()
-        self._render_cache: dict[tuple[str, ...], Guideline] = {}
+        self._render_cache: OrderedDict[tuple[str, ...], Guideline] = OrderedDict()
 
     @property
     def release(self) -> Release | None:
@@ -103,11 +106,20 @@ class _SystemKnowledgeBase:
         return parse_pcs_tabular(path)
 
     def _load_index(self) -> IndexStore:
-        paths = self._require_provider().paths(self.system, "index")
-        return parse_index(paths, system=self.system)
+        provider = self._require_provider()
+        if isinstance(provider, CMSProvider):
+            from .parsed_cache import load_index_store
+
+            return load_index_store(provider, self.system)
+        return parse_index(provider.paths(self.system, "index"), system=self.system)
 
     def _load_guidelines(self) -> GuidelineStore:
-        path = self._require_provider().paths(self.system, "guidelines")[0]
+        provider = self._require_provider()
+        if isinstance(provider, CMSProvider):
+            from .parsed_cache import load_guideline_store
+
+            return load_guideline_store(provider, self.system)
+        path = provider.paths(self.system, "guidelines")[0]
         return parse_guidelines(path, system=self.system)
 
     def __getitem__(self, code: str) -> Code:
@@ -240,8 +252,10 @@ class _SystemKnowledgeBase:
     def render_guidelines(self, keys: Iterable[str]) -> Guideline:
         """Render selected guideline sections with shared ancestors once."""
         cache_key = tuple(sorted(set(keys), key=_natural_sort_key))
-        if cache_key in self._render_cache:
-            return self._render_cache[cache_key]
+        cached = self._render_cache.get(cache_key)
+        if cached is not None:
+            self._render_cache.move_to_end(cache_key)
+            return cached
         expanded: list[str] = []
         for key in cache_key:
             if key in self.guidelines.keys():
@@ -272,6 +286,8 @@ class _SystemKnowledgeBase:
             content="\n\n".join(parts).strip(),
         )
         self._render_cache[cache_key] = result
+        while len(self._render_cache) > _RENDER_CACHE_MAX:
+            self._render_cache.popitem(last=False)
         return result
 
 
