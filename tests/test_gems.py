@@ -280,3 +280,37 @@ def test_parse_gems_rejects_invalid_records(tmp_path: Path, record: str) -> None
             system="cm",
             direction=GEMDirection.ICD9_TO_ICD10,
         )
+
+
+@pytest.mark.parametrize(
+    ("filename", "system", "direction", "record"),
+    [
+        # ICD-9-CM diagnosis codes are 3-5 digits, optionally V- or E-prefixed.
+        ("2018_I9gem.txt", "cm", GEMDirection.ICD9_TO_ICD10, "A000 0010 10000"),
+        ("2018_I10gem.txt", "cm", GEMDirection.ICD10_TO_ICD9, "A000 V0 10000"),
+        # ICD-10-CM codes start with a letter, a digit, and 1-5 more
+        # alphanumeric characters.
+        ("2018_I9gem.txt", "cm", GEMDirection.ICD9_TO_ICD10, "0010 BADCODE 10000"),
+        ("2018_I10gem.txt", "cm", GEMDirection.ICD10_TO_ICD9, "0010 A000 10000"),
+        # ICD-9-CM procedure codes are 3-4 digits; ICD-10-PCS is seven
+        # characters from the ICD-10-PCS alphabet, which omits I and O.
+        ("2018_I9pcs.txt", "pcs", GEMDirection.ICD9_TO_ICD10, "0ABC0ZZ 0010 10000"),
+        ("2018_I9pcs.txt", "pcs", GEMDirection.ICD9_TO_ICD10, "0010 0ABC0ZI 10000"),
+        ("2018_PCSI9.txt", "pcs", GEMDirection.ICD10_TO_ICD9, "0010 0ABC0ZZ 10000"),
+        ("2018_PCSI9.txt", "pcs", GEMDirection.ICD10_TO_ICD9, "0ABC0ZZ 0ABC0ZZ 10000"),
+    ],
+)
+def test_parse_gems_rejects_codes_outside_documented_layout(
+    tmp_path: Path,
+    filename: str,
+    system: str,
+    direction: GEMDirection,
+    record: str,
+) -> None:
+    path = tmp_path / filename
+    path.write_text(record + "\n", encoding="ascii")
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_gems((path,), system=system, direction=direction)
+
+    assert f"{path.name}:1" in str(excinfo.value)

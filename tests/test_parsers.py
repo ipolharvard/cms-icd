@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -37,7 +38,7 @@ CM_XML = """\
 
 
 PCS_XML = """\
-<ICD10PCS>
+<ICD10PCS.tabular>
   <pcsTable>
     <axis pos="1"><title>Section</title><label code="0">Medical</label></axis>
     <axis pos="2"><title>Body System</title><label code="A">Nervous</label></axis>
@@ -50,7 +51,7 @@ PCS_XML = """\
       </axis>
     </pcsRow>
   </pcsTable>
-</ICD10PCS>
+</ICD10PCS.tabular>
 """
 
 
@@ -62,6 +63,64 @@ INDEX_XML = """\
       <title>Hypertension (arterial)</title>
       <code>I10</code>
       <term><title>secondary</title><code>I15.9</code></term>
+    </mainTerm>
+  </letter>
+</ICD10CM.index>
+"""
+
+
+INDEX_CELL_XML = """\
+<ICD10CM.index>
+  <indexHeading>
+    <head col="1">Code</head>
+  </indexHeading>
+  <letter>
+    <title>H</title>
+    <mainTerm>
+      <title>Hypertension (arterial)</title>
+      <cell col="1">I10</cell>
+    </mainTerm>
+  </letter>
+</ICD10CM.index>
+"""
+
+
+INDEX_RANGE_XML = """\
+<ICD10CM.index>
+  <indexHeading>
+    <head col="1">Code</head>
+  </indexHeading>
+  <letter>
+    <title>A</title>
+    <mainTerm>
+      <title>Code range</title>
+      <code>A00-A09</code>
+    </mainTerm>
+  </letter>
+  <letter>
+    <title>E</title>
+    <mainTerm>
+      <title>Manifestation range</title>
+      <manif>E80.0-E80.4</manif>
+    </mainTerm>
+  </letter>
+  <letter>
+    <title>I</title>
+    <mainTerm>
+      <title>Cell range</title>
+      <cell col="1">I10-I15</cell>
+    </mainTerm>
+    <mainTerm>
+      <title>Single code</title>
+      <code>I10</code>
+    </mainTerm>
+    <mainTerm>
+      <title>Single manifestation</title>
+      <manif>I15.9</manif>
+    </mainTerm>
+    <mainTerm>
+      <title>Single cell</title>
+      <cell col="1">I10.</cell>
     </mainTerm>
   </letter>
 </ICD10CM.index>
@@ -93,6 +152,22 @@ def test_pcs_parser_validates_and_generates_combinations(tmp_path: Path) -> None
         parse_pcs_tabular(bad_path)
 
 
+def test_pcs_parser_axis_non_numeric_values_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(PCS_XML.replace('values="2"', 'values="abc"'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_row_non_numeric_codes_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(PCS_XML.replace('codes="2"', 'codes="abc"'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
 def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) -> None:
     path = tmp_path / "icd10cm_index.xml"
     path.write_text(INDEX_XML)
@@ -103,6 +178,192 @@ def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) ->
     assert main.title == "Hypertension"
     assert main.optional_modifiers == ("arterial",)
     assert child.path == "Hypertension, secondary"
+
+
+def test_index_parser_reads_numbered_cells(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML)
+
+    store = parse_index((path,), system="cm")
+    main = store.main_terms()[0]
+    cell = store.children(main.id)[0]
+    assert cell.title == "Code"
+    assert cell.code == "I10"
+
+
+def test_index_parser_cell_missing_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<cell col="1">', "<cell>"))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_cell_non_numeric_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<cell col="1">', '<cell col="abc">'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_head_missing_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<head col="1">', "<head>"))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_head_non_numeric_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_CELL_XML.replace('<head col="1">', '<head col="abc">'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
+def test_index_parser_preserves_raw_ranges_without_concatenation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_RANGE_XML)
+
+    store = parse_index((path,), system="cm")
+    terms = {term.title: term for term in store.values()}
+
+    code_range = terms["Code range"]
+    assert code_range.code == "A00-A09"
+    assert code_range.assignable is False
+    manifestation_range = terms["Manifestation range"]
+    assert manifestation_range.code is None
+    assert manifestation_range.manifestation_code == "E80.0-E80.4"
+    assert manifestation_range.assignable is False
+    cell = store.children(terms["Cell range"].id)[0]
+    assert cell.code == "I10-I15"
+    assert cell.assignable is False
+
+
+def test_index_parser_single_values_keep_existing_behavior(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_RANGE_XML)
+
+    store = parse_index((path,), system="cm")
+    terms = {term.title: term for term in store.values()}
+
+    assert terms["Single code"].code == "I10"
+    assert terms["Single code"].assignable is True
+    assert terms["Single manifestation"].code is None
+    assert terms["Single manifestation"].manifestation_code == "I15.9"
+    assert terms["Single manifestation"].assignable is True
+    cell = store.children(terms["Single cell"].id)[0]
+    assert cell.code == "I10"
+    assert cell.assignable is True
+
+
+def test_get_assignable_terms_never_resolve_to_no_codes(
+    tmp_path: Path,
+) -> None:
+    from cms_icd.knowledge_base import ICD10CMKnowledgeBase
+    from cms_icd.models import Code, Node
+    from cms_icd.stores import TabularStore
+
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_RANGE_XML)
+    index = parse_index((path,), system="cm")
+
+    root = Node("cm", "cm", children_ids=("I10", "I15"))
+    i10 = Code("I10", "I10", parent_id="cm")
+    i15 = Node("I15", "I15", parent_id="cm", children_ids=("I15.9",))
+    i15_9 = Code("I15.9", "I15.9", parent_id="I15")
+    tabular = TabularStore(
+        {node.id: node for node in (root, i10, i15, i15_9)},
+        {"I10": "I10", "I15.9": "I15.9"},
+        ("cm",),
+    )
+    kb = ICD10CMKnowledgeBase.from_stores(tabular=tabular, index=index)
+
+    assert kb.get_assignable_terms()
+    for term in kb.get_assignable_terms():
+        assert kb.get_term_codes(term.id), term
+
+
+def test_cm_tabular_rejects_pcs_tables_file(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text(PCS_XML)
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_cm_tabular(path)
+
+    message = str(excinfo.value)
+    assert path.name in message
+    assert "ICD10CM.tabular" in message
+    assert "ICD10PCS.tabular" in message
+
+
+def test_pcs_tabular_rejects_cm_tabular_file(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(CM_XML)
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_pcs_tabular(path)
+
+    message = str(excinfo.value)
+    assert path.name in message
+    assert "ICD10PCS.tabular" in message
+    assert "ICD10CM.tabular" in message
+
+
+def test_cm_tabular_rejects_file_without_chapters(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text("<ICD10CM.tabular>\n</ICD10CM.tabular>\n")
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_cm_tabular(path)
+
+
+def test_pcs_tabular_rejects_file_without_tables(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text("<ICD10PCS.tabular>\n</ICD10PCS.tabular>\n")
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_index_rejects_pcs_tables_root(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(PCS_XML)
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_index((path,), system="cm")
+
+    message = str(excinfo.value)
+    assert path.name in message
+    assert "ICD10CM.index" in message
+    assert "ICD10PCS.tabular" in message
+
+
+def test_index_rejects_cross_system_root(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_index.xml"
+    path.write_text(INDEX_XML)
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_index((path,), system="pcs")
+
+    message = str(excinfo.value)
+    assert path.name in message
+    assert "ICD10PCS.index" in message
+    assert "ICD10CM.index" in message
+
+
+def test_index_rejects_file_without_terms(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text("<ICD10CM.index>\n</ICD10CM.index>\n")
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
 
 
 class _MediaBox:
