@@ -43,6 +43,7 @@ CMS_CATALOG_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes"
 CMS_ARCHIVE_URL = "https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-10-cm-icd-10-pcs-gem-archive"
 _PACKAGE_NAME = "cms-icd"
 _CACHE_SUBDIRECTORY = Path("ipolharvard") / _PACKAGE_NAME.replace("-", "_")
+_FALLBACK_LATEST_FOR_FY = "latest_for_fy"
 
 _catalog_lock = Lock()
 _catalog_cache: dict[tuple[str, bool], Future[tuple[CatalogEntry, ...]]] = {}
@@ -377,24 +378,187 @@ def default_cache_dir() -> Path:
     return cache_root / _CACHE_SUBDIRECTORY
 
 
+_LOCK_MARKER_NAME = "pid"
+_LOCK_TIMEOUT_SECONDS = 600.0
+_LOCK_RETRY_SECONDS = 0.05
+_LOCK_PID_REUSE_MARGIN_SECONDS = 1.0
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Return True when a process with this PID appears to exist."""
+    if os.name != "posix":
+        # Signal-based liveness probing is not portable; assume a recorded
+        # holder is alive so a live lock is never reclaimed.
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _linux_process_stats(pid: int) -> tuple[str, float] | None:
+    """Return (state, start time in epoch seconds) from Linux /proc, else None."""
+    try:
+        raw = Path("/proc", str(pid), "stat").read_bytes()
+        with Path("/proc/stat").open("rb") as handle:
+            btime = next(
+                int(line.split()[1]) for line in handle if line.startswith(b"btime ")
+            )
+    except (OSError, StopIteration, ValueError, IndexError):
+        return None
+    try:
+        # Fields after the parenthesized command name, which may itself
+        # contain parentheses: field 3 (state) and field 22 (starttime).
+        fields = raw.rsplit(b")", 1)[1].split()
+        hertz = os.sysconf("SC_CLK_TCK")
+        return fields[0].decode("ascii"), btime + int(fields[19]) / hertz
+    except (IndexError, ValueError, OSError, AttributeError, UnicodeDecodeError):
+        return None
+
+
+def _lock_holder_pid(lock: Path) -> int | None:
+    """Return the PID recorded in a lock directory, or None if absent."""
+    try:
+        pid = int((lock / _LOCK_MARKER_NAME).read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _lock_is_stale(lock: Path) -> bool:
+    """Return True when the lock directory has no live holder."""
+    try:
+        raw = (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii")
+    except FileNotFoundError:
+        return True
+    except OSError:
+        # An unreadable marker is not proof that the holder is gone.
+        return False
+    try:
+        holder = int(raw.strip())
+    except ValueError:
+        return True
+    if holder <= 0 or not _pid_is_alive(holder):
+        return True
+    stats = _linux_process_stats(holder)
+    if stats is None:
+        return False
+    state, started = stats
+    if state == "Z":
+        # A zombie has exited and will never remove its lock.
+        return True
+    try:
+        acquired = lock.stat().st_mtime
+    except OSError:
+        return False
+    # The holder must have started before creating the lock. A process
+    # started after the lock exists holds a reused PID, not the lock.
+    return started > acquired + _LOCK_PID_REUSE_MARGIN_SECONDS
+
+
+def _write_lock_holder(lock: Path, pid: int) -> None:
+    """Atomically record the holder PID inside the lock directory."""
+    with NamedTemporaryFile(dir=lock, prefix="pid.", delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(str(pid).encode("ascii"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, lock / _LOCK_MARKER_NAME)
+
+
+def _reclaim_stale_lock(lock: Path) -> bool:
+    """Move a holder-less lock aside and delete it.
+
+    The staleness verdict is re-checked on the moved directory: if the holder
+    completed its atomic marker write while the directory was being moved, the
+    lock is restored instead of deleted, so a live holder can never lose its
+    lock to an in-flight reclaim. Return True when the lock was removed.
+    """
+    try:
+        leftover = lock.with_name(f"{lock.name}.stale.{os.getpid()}")
+        lock.rename(leftover)
+    except OSError:
+        return False
+    if not _lock_is_stale(leftover):
+        try:
+            leftover.rename(lock)
+        except OSError:
+            # The lock name was taken in the meantime; the orphaned holder
+            # directory cannot be restored, so remove it.
+            shutil.rmtree(leftover, ignore_errors=True)
+        return False
+    shutil.rmtree(leftover, ignore_errors=True)
+    return True
+
+
 @contextmanager
-def _directory_lock(path: Path, timeout: float = 30.0) -> Iterable[None]:
+def _directory_lock(
+    path: Path, timeout: float = _LOCK_TIMEOUT_SECONDS
+) -> Iterable[None]:
+    """Serialize cache mutations across processes with a sibling lock directory.
+
+    The holder records its PID inside the lock directory. A lock whose marker is missing
+    or whose recorded PID is dead, a zombie, or a PID reused for a newer process is
+    holder-less and reclaimed immediately, so a killed process cannot permanently block
+    a cache destination. A lock held by a live process is waited on for up to
+    ``timeout`` seconds; the default is sized to outlast a healthy download, extraction,
+    or parse. A timeout names the live holder PID (or notes that no live holder could be
+    removed) so a stuck holder can be found. Release renames the whole directory aside
+    atomically, so a releasing holder never leaves a marker-less window that a waiter
+    could mistake for a stale lock.
+    """
     lock = path.with_suffix(path.suffix + ".lock")
     deadline = time.monotonic() + timeout
     while True:
         try:
             lock.mkdir(parents=True)
-            break
         except FileExistsError:
+            stale = _lock_is_stale(lock)
+            reclaimed = _reclaim_stale_lock(lock) if stale else False
+            if time.monotonic() >= deadline and not reclaimed:
+                holder = _lock_holder_pid(lock)
+                if holder is not None:
+                    detail = f"; holder pid {holder} is still running"
+                else:
+                    detail = "; the lock has no live holder and could not be removed"
+                raise DownloadError(
+                    f"Timed out after {timeout:g}s waiting for cache lock: "
+                    f"{lock}{detail}"
+                ) from None
+            time.sleep(_LOCK_RETRY_SECONDS)
+            continue
+        try:
+            _write_lock_holder(lock, os.getpid())
+        except FileNotFoundError:
+            # The marker-less creation window was reclaimed while we were
+            # recording the holder; retry the acquisition.
             if time.monotonic() >= deadline:
                 raise DownloadError(
-                    f"Timed out waiting for cache lock: {lock}"
+                    f"Timed out after {timeout:g}s waiting for cache lock: {lock}"
                 ) from None
-            time.sleep(0.05)
+            continue
+        except OSError:
+            # Only remove the lock when its marker identifies this process;
+            # a missing or foreign marker may belong to a concurrent holder.
+            if _lock_holder_pid(lock) == os.getpid():
+                shutil.rmtree(lock, ignore_errors=True)
+            raise DownloadError(
+                f"Unable to record holder in cache lock: {lock}"
+            ) from None
+        break
     try:
         yield
     finally:
-        lock.rmdir()
+        try:
+            leftover = lock.with_name(f"{lock.name}.released.{os.getpid()}")
+            lock.rename(leftover)
+        except OSError:
+            pass
+        else:
+            shutil.rmtree(leftover, ignore_errors=True)
 
 
 class CMSProvider(MaterialProvider):
@@ -416,6 +580,8 @@ class CMSProvider(MaterialProvider):
         offline: bool = False,
         session: requests.Session | None = None,
     ) -> None:
+        if fallback is not None and fallback != _FALLBACK_LATEST_FOR_FY:
+            raise ValueError(f"Unsupported fallback: {fallback!r}")
         self.release = release
         self.service_date = service_date
         self.cache_dir = (
@@ -474,7 +640,7 @@ class CMSProvider(MaterialProvider):
 
         unique = {(item.url, item.release_date): item for item in candidates}
         candidates = list(unique.values())
-        if not candidates and self.fallback == "latest_for_fy":
+        if not candidates and self.fallback == _FALLBACK_LATEST_FOR_FY:
             available = [
                 entry
                 for entry in all_for_year

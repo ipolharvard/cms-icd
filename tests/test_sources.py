@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from threading import Event, Thread
 from zipfile import ZipFile
 
 import pytest
 import requests
 
+from cms_icd import ICD10KnowledgeBase
 from cms_icd.exceptions import (
     AmbiguousReleaseError,
     DownloadError,
@@ -18,9 +23,12 @@ from cms_icd.exceptions import (
 )
 from cms_icd.models import Release
 from cms_icd.sources import (
+    _LOCK_MARKER_NAME,
     CMSProvider,
     DirectoryProvider,
     _clear_catalog_memory_cache,
+    _directory_lock,
+    _reclaim_stale_lock,
     default_cache_dir,
     parse_catalog,
     refresh_cms_catalog,
@@ -551,3 +559,112 @@ def test_offline_provider_requires_cached_catalog(tmp_path: Path) -> None:
 
     with pytest.raises(DownloadError, match="cached CMS catalog"):
         provider.paths("cm", "gems")
+
+
+def test_stale_lock_without_holder_is_reclaimed(tmp_path: Path) -> None:
+    session = FakeSession(_cm_archive())
+    provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+    (tmp_path / "catalog.json.lock").mkdir()
+
+    paths = provider.paths("cm", "tabular")
+
+    assert [path.name for path in paths] == ["icd10cm_tabular_2026.xml"]
+    assert not (tmp_path / "catalog.json.lock").exists()
+    assert not list(tmp_path.rglob("*.lock"))
+
+
+def test_stale_lock_with_dead_holder_pid_is_reclaimed(tmp_path: Path) -> None:
+    with subprocess.Popen([sys.executable, "-c", "pass"]) as process:
+        process.wait()
+        dead_pid = process.pid
+    try:
+        os.kill(dead_pid, 0)
+    except ProcessLookupError:
+        pass
+    else:
+        pytest.skip("dead PID was reused before it could be probed")
+    lock = tmp_path / "catalog.json.lock"
+    lock.mkdir()
+    (lock / _LOCK_MARKER_NAME).write_text(str(dead_pid), encoding="ascii")
+    session = FakeSession(_cm_archive())
+    provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    paths = provider.paths("cm", "tabular")
+
+    assert [path.name for path in paths] == ["icd10cm_tabular_2026.xml"]
+    assert not lock.exists()
+
+
+def test_live_holder_lock_is_waited_not_reclaimed(tmp_path: Path) -> None:
+    target = tmp_path / "catalog.json"
+    acquired = Event()
+    release = Event()
+
+    def hold() -> None:
+        with _directory_lock(target):
+            acquired.set()
+            release.wait(10)
+
+    holder = Thread(target=hold)
+    holder.start()
+    try:
+        assert acquired.wait(10)
+        with pytest.raises(DownloadError, match="waiting for cache lock"):
+            with _directory_lock(target, timeout=0.3):
+                pass
+        assert (tmp_path / "catalog.json.lock").exists()
+    finally:
+        release.set()
+        holder.join(10)
+
+    with _directory_lock(target):
+        pass
+    assert not (tmp_path / "catalog.json.lock").exists()
+
+
+def test_reclaim_restores_lock_whose_marker_landed_before_rename(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / "catalog.json.lock"
+    lock.mkdir()
+    # A waiter's staleness verdict was computed while the holder (this
+    # process) was between mkdir and its atomic marker write; the marker
+    # landed before the rename, so the holder is live and must keep the
+    # lock rather than have it reclaimed in flight.
+    (lock / _LOCK_MARKER_NAME).write_text(str(os.getpid()), encoding="ascii")
+
+    assert not _reclaim_stale_lock(lock)
+
+    assert lock.exists()
+    assert (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii") == str(os.getpid())
+
+
+def test_unknown_fallback_value_is_rejected() -> None:
+    for value in ("latest-fy", "latest_for_fy2026", ""):
+        with pytest.raises(ValueError, match="fallback"):
+            CMSProvider(Release(2026, date(2026, 2, 1)), fallback=value)
+
+    provider = CMSProvider(Release(2026, date(2026, 2, 1)))
+    assert provider.fallback is None
+    provider = CMSProvider(Release(2026, date(2026, 2, 1)), fallback="latest_for_fy")
+    assert provider.fallback == "latest_for_fy"
+
+
+def test_from_cms_and_for_date_reject_unknown_fallback() -> None:
+    for value in ("latest-fy", "latest_fy"):
+        with pytest.raises(ValueError, match="fallback"):
+            ICD10KnowledgeBase.from_cms(
+                fiscal_year=2026,
+                release_date=date(2026, 2, 1),
+                fallback=value,
+            )
+        with pytest.raises(ValueError, match="fallback"):
+            ICD10KnowledgeBase.for_date(date(2026, 2, 1), fallback=value)
