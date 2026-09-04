@@ -46,6 +46,7 @@ nav:
       - Stores: reference/stores.md
       - Sources: reference/sources.md
       - Exceptions: reference/exceptions.md
+      - Constants: reference/constants.md
   - Testing CMS compatibility: testing.md
   - Development: development.md
 
