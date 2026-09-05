@@ -28,8 +28,20 @@ class GEMSystemView:
         icd10_to_icd9: GEMStore | None = None,
         correction_providers: tuple[MaterialProvider, ...] = (),
     ) -> None:
+        """Create a lazy view for one ICD-10 system.
+
+        Prebuilt direction stores and ``correction_providers`` are mutually
+        exclusive: the correction pipeline only applies to GEMs loaded from
+        the base provider, so a prebuilt direction would silently ignore
+        the requested corrections.
+        """
         if system not in {"cm", "pcs"}:
             raise ValueError(f"Unsupported GEM system: {system!r}")
+        has_prebuilt_store = icd9_to_icd10 is not None or icd10_to_icd9 is not None
+        if has_prebuilt_store and correction_providers:
+            raise ValueError(
+                "prebuilt direction stores cannot be combined with correction_providers"
+            )
         self._provider = provider
         self._correction_providers = correction_providers
         self.system = system
