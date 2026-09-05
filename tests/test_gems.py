@@ -11,11 +11,13 @@ from cms_icd import (
     GEMEntry,
     GEMKnowledgeBase,
     GEMStore,
+    GEMSystemView,
 )
 from cms_icd.exceptions import ParseError
 from cms_icd.gems import _backport_corrections
 from cms_icd.models import Node, Release
 from cms_icd.parsers import parse_gems
+from cms_icd.sources import DirectoryProvider
 from cms_icd.stores import TabularStore
 
 if TYPE_CHECKING:
@@ -139,6 +141,37 @@ def _store(
 
 def _mapped(source: str, target: str, *, approximate: bool = True) -> GEMEntry:
     return GEMEntry(source, target, approximate, False, False, 0, 0)
+
+
+def test_gem_system_view_rejects_prebuilt_stores_with_correction_providers(
+    tmp_path: Path,
+) -> None:
+    icd9_store = _store(2018, {"0010": (_mapped("0010", "A000"),)})
+    icd10_store = GEMStore(
+        {"A000": (_mapped("A000", "0010"),)},
+        system="cm",
+        direction=GEMDirection.ICD10_TO_ICD9,
+        release=Release(2018, date(2017, 10, 1)),
+    )
+    provider = DirectoryProvider(tmp_path, Release(2018, date(2017, 10, 1)))
+
+    with pytest.raises(ValueError):
+        GEMSystemView(
+            provider,
+            "cm",
+            icd9_to_icd10=icd9_store,
+            correction_providers=(provider,),
+        )
+    with pytest.raises(ValueError):
+        GEMSystemView(
+            provider,
+            "cm",
+            icd10_to_icd9=icd10_store,
+            correction_providers=(provider,),
+        )
+
+    view = GEMSystemView.from_stores("cm", icd9_to_icd10=icd9_store)
+    assert view.icd9_to_icd10 is icd9_store
 
 
 def test_retrospective_corrections_apply_only_before_lifecycle_boundary() -> None:
