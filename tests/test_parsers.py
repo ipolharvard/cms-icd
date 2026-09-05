@@ -137,6 +137,34 @@ class _Page:
         )
 
 
+class _PcsPage:
+    mediabox = _MediaBox()
+
+    def extract_text(self, *, visitor_text):
+        identity = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        visitor_text(
+            "Page 1 of 2",
+            identity,
+            (1.0, 0.0, 0.0, 1.0, 10.0, 20.0),
+            None,
+            10.0,
+        )
+        visitor_text(
+            "ICD-10-PCS Official Guidelines",
+            identity,
+            (1.0, 0.0, 0.0, 1.0, 10.0, -20.0),
+            None,
+            10.0,
+        )
+        return (
+            "ICD-10-PCS Official Guidelines for Coding and Reporting\n"
+            "FY 2026\n"
+            "Page 1 of 2\n"
+            "Body cites the ICD-10-PCS Official Guidelines.\n"
+            "Page 1 of 2\n"
+        )
+
+
 class _Destination:
     def __init__(self, title: str, page: int) -> None:
         self.title = title
@@ -157,6 +185,12 @@ def test_guideline_page_text_removes_only_positioned_footer() -> None:
     text = _page_text(_Page())  # type: ignore[arg-type]
 
     assert text == "Body cites the ICD-10-CM Official Guidelines."
+
+
+def test_guideline_page_text_removes_pcs_running_header() -> None:
+    text = _page_text(_PcsPage(), "pcs")  # type: ignore[arg-type]
+
+    assert text == "Body cites the ICD-10-PCS Official Guidelines."
 
 
 def test_text_position_applies_page_transformation() -> None:
