@@ -23,11 +23,18 @@ _SECTION = re.compile(r"Section\s+(IV|I{1,3})\b", re.I)
 _SUBSECTION = re.compile(r"^([A-Z])\.\s")
 _NUMBER = re.compile(r"^(\d+)\.\s")
 _PAGE_FOOTER = re.compile(r"^Page\s+\d+\s+of\s+\d+$", re.I)
-_CM_RUNNING_FOOTER = re.compile(
-    r"\s*ICD\s*-\s*10\s*-\s*CM\s+Official\s+Guidelines\s+for\s+Coding\s+and"
-    r"\s+Reporting\s+FY\s+\d{4}\s+Page\s+\d+\s+of\s+\d+\s*",
-    re.I,
-)
+_RUNNING_FOOTERS: dict[str, re.Pattern[str]] = {
+    "cm": re.compile(
+        r"\s*ICD\s*-\s*10\s*-\s*CM\s+Official\s+Guidelines\s+for\s+Coding\s+and"
+        r"\s+Reporting\s+FY\s+\d{4}\s+Page\s+\d+\s+of\s+\d+\s*",
+        re.I,
+    ),
+    "pcs": re.compile(
+        r"\s*ICD\s*-\s*10\s*-\s*PCS\s+Official\s+Guidelines\s+for\s+Coding\s+and"
+        r"\s+Reporting\s+FY\s+\d{4}\s+Page\s+\d+\s+of\s+\d+\s*",
+        re.I,
+    ),
+}
 
 
 def _text_position(
@@ -39,7 +46,7 @@ def _text_position(
     return x + user_matrix[4], y + user_matrix[5]
 
 
-def _page_text(page: PageObject) -> str:
+def _page_text(page: PageObject, system: str = "cm") -> str:
     footer_text: set[str] = set()
     threshold = float(page.mediabox.height) * 0.08
 
@@ -56,7 +63,7 @@ def _page_text(page: PageObject) -> str:
             footer_text.add(item)
 
     text = page.extract_text(visitor_text=visit_text) or ""
-    text = _CM_RUNNING_FOOTER.sub("", text)
+    text = _RUNNING_FOOTERS[system].sub("", text)
     for item in footer_text:
         text = text.replace(item, "", 1)
     text = re.sub(
@@ -204,7 +211,7 @@ def parse_guidelines(path: str | Path, *, system: str) -> GuidelineStore:
         ) from exc
     try:
         if system == "pcs":
-            content = "\n".join(_page_text(page) for page in document.pages)
+            content = "\n".join(_page_text(page, system) for page in document.pages)
             guideline = Guideline(
                 "document", "document", "Official Guidelines", content
             )
