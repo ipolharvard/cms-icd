@@ -105,6 +105,29 @@ def test_index_parser_preserves_direct_children_and_modifiers(tmp_path: Path) ->
     assert child.path == "Hypertension, secondary"
 
 
+@pytest.mark.parametrize(
+    ("filename", "source"),
+    [
+        ("e-index.xml", "External Cause"),
+        ("E-Index.xml", "External Cause"),
+        ("icd10cm_eindex_2026.xml", "External Cause"),
+        ("icd10cm_index_2026.xml", ""),
+        ("icd10cm_neoplasm_2026.xml", "Neoplasm"),
+        ("icd10cm_drug_2026.xml", "Drug"),
+    ],
+)
+def test_index_parser_classifies_index_source_by_filename(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+) -> None:
+    path = tmp_path / filename
+    path.write_text(INDEX_XML)
+    store = parse_index((path,), system="cm")
+
+    assert store.main_terms()[0].source == source
+
+
 class _MediaBox:
     height = 1_000
 

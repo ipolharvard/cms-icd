@@ -533,7 +533,7 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
             "Neoplasm"
             if "neoplasm" in source_name
             else "External Cause"
-            if "eindex" in source_name
+            if "eindex" in source_name or "e-index" in source_name
             else "Drug"
             if "drug" in source_name
             else ""
