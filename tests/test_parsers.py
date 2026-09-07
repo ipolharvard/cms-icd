@@ -431,18 +431,47 @@ class _PcsPage:
 
 
 class _Destination:
-    def __init__(self, title: str, page: int) -> None:
+    def __init__(self, title: str, page: int | None) -> None:
         self.title = title
         self.page = page
 
 
 class _Reader:
     def __init__(self) -> None:
+        container = _Destination("Structure Bookmarks", None)
         first = _Destination("Section I. Conventions", 0)
         child = _Destination("A. Basic conventions", 1)
-        self.outline = [first, [child]]
+        self.outline = [container, first, [child]]
 
-    def get_destination_page_number(self, destination: _Destination) -> int:
+    def get_destination_page_number(self, destination: _Destination) -> int | None:
+        return destination.page
+
+
+class _TaggedReader:
+    def __init__(self) -> None:
+        self.pages = [
+            ("Section I. Conventions\nA. Basic conventions\n1. First rule\nRule body"),
+            "Section II. Selection\nSelection body",
+        ]
+        self.outline = [
+            _Destination("Structure Bookmarks", None),
+            [
+                _Destination("Section I. Conventions ........ 1", 0),
+                _Destination("Section I. Conventions", 0),
+                [
+                    _Destination("A. Basic conventions", 0),
+                    [_Destination("1. First rule", 0)],
+                ],
+                _Destination("Section I. Conventions", 0),
+                [
+                    _Destination("A. Basic conventions", 0),
+                    [_Destination("1. First rule", 0)],
+                ],
+                _Destination("Section II. Selection", 1),
+            ],
+        ]
+
+    def get_destination_page_number(self, destination: _Destination) -> int | None:
         return destination.page
 
 
@@ -504,6 +533,29 @@ def test_guideline_outline_preserves_nested_levels_and_one_based_pages() -> None
         (1, "Section I. Conventions", 1),
         (2, "A. Basic conventions", 2),
     ]
+
+
+def test_cm_guidelines_accept_tagged_outline_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "cms_icd.guidelines._page_text",
+        lambda page: page,
+    )
+
+    store = _structured_cm_guidelines(  # type: ignore[arg-type]
+        _TaggedReader(), "guidelines.pdf"
+    )
+
+    assert store.titles == {
+        "I": "Conventions",
+        "I.A": "Basic conventions",
+        "I.A.1": "First rule",
+        "II": "Selection",
+    }
+    assert set(store) == {"I.A.1", "II"}
+    assert store["I.A.1"].content == "Rule body"
+    assert store["II"].content == "Selection body"
 
 
 def test_cm_guideline_parser_requires_structured_outline(tmp_path: Path) -> None:

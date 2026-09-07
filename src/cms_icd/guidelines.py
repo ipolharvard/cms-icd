@@ -20,8 +20,10 @@ if TYPE_CHECKING:
 
 
 _SECTION = re.compile(r"Section\s+(IV|I{1,3})\b", re.I)
+_SECTION_START = re.compile(r"^Section\s+(IV|I{1,3})\b", re.I)
 _SUBSECTION = re.compile(r"^([A-Z])\.\s")
 _NUMBER = re.compile(r"^(\d+)\.\s")
+_TOC_LEADER = re.compile(r"\.{3,}")
 _PAGE_FOOTER = re.compile(r"^Page\s+\d+\s+of\s+\d+$", re.I)
 _RUNNING_FOOTERS: dict[str, re.Pattern[str]] = {
     "cm": re.compile(
@@ -94,7 +96,7 @@ def _outline_entries(
                 continue
             page_number = document.get_destination_page_number(item)
             if page_number is None:
-                raise ParseError(f"Guideline outline destination has no page: {item!s}")
+                continue
             yield level, str(item.title), page_number + 1
 
     yield from walk(document.outline, 1)
@@ -127,46 +129,80 @@ def _strip_leaf_header(title: str, content: str) -> str:
 
 
 def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> GuidelineStore:
+    outline = list(_outline_entries(document))
+    fixed_depth = any(
+        level == 1 and _SECTION.search(title) for level, title, _ in outline
+    )
     entries: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
     current_section: str | None = None
     current_subsection: str | None = None
-    for level, raw_title, page_number in _outline_entries(document):
-        if level == 1 and (match := _SECTION.search(raw_title)):
+    for level, raw_title, page_number in outline:
+        if fixed_depth:
+            section_match = _SECTION.search(raw_title) if level == 1 else None
+            subsection_match = _SUBSECTION.match(raw_title) if level == 2 else None
+            number_match = _NUMBER.match(raw_title) if level == 3 else None
+        else:
+            if _TOC_LEADER.search(raw_title):
+                continue
+            section_match = _SECTION_START.match(raw_title)
+            subsection_match = _SUBSECTION.match(raw_title)
+            number_match = _NUMBER.match(raw_title)
+
+        if section_match:
+            match = section_match
             current_section = match.group(1).upper()
             current_subsection = None
             title = re.sub(
                 r"Section\s+(?:IV|I{1,3})\.\s*", "", raw_title, count=1, flags=re.I
             ).strip()
+            key = current_section
+            semantic_level = 1
+            if not fixed_depth and key in seen_keys:
+                continue
             entries.append(
                 {
-                    "key": current_section,
+                    "key": key,
                     "title": title,
                     "page": page_number,
-                    "level": 1,
+                    "level": semantic_level,
                     "raw_title": raw_title,
                 }
             )
-        elif level == 2 and current_section and (match := _SUBSECTION.match(raw_title)):
+            seen_keys.add(key)
+        elif current_section and subsection_match:
+            match = subsection_match
             current_subsection = f"{current_section}.{match.group(1)}"
+            key = current_subsection
+            semantic_level = 2
+            if not fixed_depth and key in seen_keys:
+                continue
             entries.append(
                 {
-                    "key": current_subsection,
+                    "key": key,
                     "title": raw_title[match.end() :].strip(),
                     "page": page_number,
-                    "level": 2,
+                    "level": semantic_level,
                     "raw_title": raw_title,
                 }
             )
-        elif level == 3 and current_subsection and (match := _NUMBER.match(raw_title)):
+            seen_keys.add(key)
+        elif current_subsection and number_match:
+            match = number_match
+            key = f"{current_subsection}.{match.group(1)}"
+            semantic_level = 3
+            if not fixed_depth and key in seen_keys:
+                continue
             entries.append(
                 {
-                    "key": f"{current_subsection}.{match.group(1)}",
+                    "key": key,
                     "title": raw_title[match.end() :].strip(),
                     "page": page_number,
-                    "level": 3,
+                    "level": semantic_level,
                     "raw_title": raw_title,
                 }
             )
+            seen_keys.add(key)
     if not entries:
         raise ParseError(f"No structured CM guideline outline found in {path}")
     for index, entry in enumerate(entries):
