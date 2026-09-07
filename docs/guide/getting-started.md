@@ -14,7 +14,7 @@ icd = ICD10KnowledgeBase.for_date(date(2026, 5, 1))
 
 Use the discharge date for inpatient ICD-10-CM and ICD-10-PCS. Use the encounter
 or date of service for other ICD-10-CM coding. See
-[Releases and caching](releases-and-caching.md) for the October/April boundary
+[Release selection](releases.md) for the October/April boundary
 and guideline availability.
 
 For a reproducible dataset or experiment, pin the exact effective snapshot:
@@ -67,6 +67,8 @@ Knowledge-base convenience methods return common relationship queries:
 
 The underlying [tabular store](../reference/stores.md#cms_icd.stores.TabularStore)
 also exposes direct children, descendants, leaves, siblings, and parents.
+Continue with [Work with ICD-10 materials](icd10-materials.md) for alphabetic
+index, instructional-note, and guideline workflows.
 
 ## Load eagerly when needed
 

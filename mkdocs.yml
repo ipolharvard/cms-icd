@@ -35,7 +35,9 @@ nav:
   - Home: index.md
   - User guide:
       - Getting started: guide/getting-started.md
-      - Releases and caching: guide/releases-and-caching.md
+      - Work with ICD-10 materials: guide/icd10-materials.md
+      - Release selection: guide/releases.md
+      - Caching and offline use: guide/caching.md
       - Local and custom sources: guide/local-sources.md
       - General Equivalence Mappings: guide/general-equivalence-mappings.md
   - API reference:
@@ -48,8 +50,9 @@ nav:
       - Caches: reference/caches.md
       - Exceptions: reference/exceptions.md
       - Constants: reference/constants.md
-  - Testing CMS compatibility: testing.md
-  - Development: development.md
+  - Project maintenance:
+      - Testing CMS compatibility: testing.md
+      - Development: development.md
 
 markdown_extensions:
   - admonition

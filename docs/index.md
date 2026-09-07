@@ -44,13 +44,17 @@ The first code lookup downloads and parses only the CM tabular material.
 - Offline loading from directories containing CMS-format files
 - Immutable records and read-only stores for predictable shared use
 
-!!! note
+See [Work with ICD-10 materials](guide/icd10-materials.md) for code hierarchy,
+alphabetic-index, instructional-note, and guideline workflows.
 
-```
-CMS does not always retain every historical intra-year revision. Exact
-release selection is strict unless the caller explicitly enables a
-fiscal-year fallback.
-```
+<div class="admonition note" markdown>
+<p class="admonition-title">Note</p>
+
+CMS does not always retain every historical intra-year revision. Exact release
+selection is strict unless the caller explicitly enables a fiscal-year
+fallback.
+
+</div>
 
 ## Citation
 

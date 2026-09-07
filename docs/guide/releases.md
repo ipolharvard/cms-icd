@@ -1,0 +1,147 @@
+# Release selection
+
+## Choose the date that controls coding
+
+Pass the date on which the codes must be valid:
+
+| Coding context                                 | Date to pass to `for_date()` |
+| ---------------------------------------------- | ---------------------------- |
+| ICD-10-CM for an inpatient stay                | Discharge date               |
+| ICD-10-CM for an outpatient or other encounter | Encounter or date of service |
+| ICD-10-PCS                                     | Inpatient discharge date     |
+
+Do not use the date on which CMS published, corrected, or downloaded a file.
+Those administrative dates do not necessarily change which codes apply.
+
+```python
+from datetime import date
+
+from cms_icd import ICD10KnowledgeBase
+
+# Inpatient CM and PCS materials for a discharge on April 1, 2025.
+icd = ICD10KnowledgeBase.for_date(date(2025, 4, 1))
+```
+
+The date passed to `for_date()` controls both `.cm` and `.pcs`. If an
+application is handling records governed by different dates, create a separate
+knowledge base for each date.
+
+## Fiscal years and revisions
+
+CMS fiscal years begin on October 1. `for_date()` calculates the fiscal year and
+selects the latest advertised revision effective on or before the relevant
+coding date. CMS-backed discovery covers production ICD-10 releases from FY
+2016 onward.
+
+```pycon
+>>> from datetime import date
+>>> from cms_icd.sources import fiscal_year_for
+>>> fiscal_year_for(date(2025, 9, 30))
+2025
+>>> fiscal_year_for(date(2025, 10, 1))
+2026
+
+```
+
+Use `from_cms()` to pin an exact fiscal-year snapshot for a reproducible
+dataset, model, or audit:
+
+```python
+icd = ICD10KnowledgeBase.from_cms(
+    fiscal_year=2026,
+    release_date=date(2026, 4, 1),
+)
+```
+
+If `release_date` is omitted, October 1 before the fiscal year is used. The
+requested date must be an effective revision advertised by CMS; an arbitrary
+date such as February 1 is not accepted as an exact snapshot.
+
+## How midyear updates work
+
+CMS commonly starts a fiscal year with an October 1 release and publishes
+additional files effective April 1. Both dates belong to the same fiscal year:
+
+```pycon
+>>> fiscal_year_for(date(2025, 3, 31))
+2025
+>>> fiscal_year_for(date(2025, 4, 1))
+2025
+
+```
+
+The April update is not necessarily a complete replacement of every material.
+A snapshot resolves each material independently:
+
+1. Use an artifact effective on the requested revision when CMS published one.
+2. Otherwise inherit the latest earlier artifact in the same fiscal year.
+3. Never inherit an artifact from a different fiscal year.
+
+For example, the currently advertised snapshots resolve as follows:
+
+| Snapshot          | CM tables/index | CM guidelines     | PCS tables/index | PCS guidelines    |
+| ----------------- | --------------- | ----------------- | ---------------- | ----------------- |
+| FY2025, October 1 | October         | October           | October          | October           |
+| FY2025, April 1   | April           | October inherited | April            | October inherited |
+| FY2026, October 1 | October         | October           | October          | October           |
+| FY2026, April 1   | April           | October inherited | April            | April             |
+
+Consequently, two knowledge bases in the same fiscal year can contain different
+codes:
+
+```python
+before_update = ICD10KnowledgeBase.for_date(date(2025, 3, 31))
+after_update = ICD10KnowledgeBase.for_date(date(2025, 4, 1))
+```
+
+The live integration suite verifies this boundary using a PCS code that is
+absent from the FY2025 October tables and present in the April tables.
+
+## Guideline support
+
+`cms-icd` supports official CMS ICD-10-CM and ICD-10-PCS guideline files from
+FY2016 onward when they are advertised for the selected snapshot. Guideline
+availability follows the same per-material revision rules as tables and
+indexes: an unchanged guideline may be inherited from an earlier revision in
+the same fiscal year, but never from another fiscal year.
+
+The package raises
+[`ReleaseUnavailableError`](../reference/exceptions.md) when CMS does not
+provide a requested guideline. It does not silently substitute a guideline from
+another fiscal year.
+
+CMS availability changes as new files are published. See the official
+[current ICD-10 files](https://www.cms.gov/medicare/coding-billing/icd-10-codes)
+and [ICD-10 archive](https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-10-cm-icd-10-pcs-gem-archive)
+for the current source catalog. The project’s
+[CMS compatibility tests](../testing.md) verify advertised material coverage.
+
+Guidelines are loaded independently of tables and indexes:
+
+```python
+cm_guidelines = icd.cm.guidelines
+pcs_guidelines = icd.pcs.guidelines
+```
+
+## Strict selection and fallback
+
+Snapshot selection is strict by default. If CMS does not advertise the
+requested revision for any supported material, accessing its first material
+raises
+[`ReleaseUnavailableError`](../reference/exceptions.md).
+
+An application may explicitly permit the latest available material in the same
+fiscal year:
+
+```python
+icd = ICD10KnowledgeBase.from_cms(
+    fiscal_year=2026,
+    release_date=date(2026, 4, 1),
+    fallback="latest_for_fy",
+)
+```
+
+> [!WARNING]
+> A fallback can change cohort labels or coding behavior. Record the resolved
+> release and use fallback only when that scientific or operational tradeoff
+> is acceptable.

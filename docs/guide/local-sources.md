@@ -58,3 +58,6 @@ True
 
 Only supplied stores are available. Accessing a missing store raises
 `RuntimeError` because no material provider exists to load it.
+
+For CMS-managed downloads, persistent reuse, or cache-only operation, use the
+[caching and offline guide](caching.md) instead.

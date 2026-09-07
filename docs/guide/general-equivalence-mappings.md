@@ -68,7 +68,8 @@ gems = GEMKnowledgeBase.from_cms(
 Offline mode never contacts CMS and raises `DownloadError` with the missing cache
 requirement. For externally managed files, use
 `GEMKnowledgeBase.from_directory(directory, fiscal_year=2018)` with the original CMS
-filenames intact.
+filenames intact. See [Caching and offline use](caching.md) for shared cache
+locations, ephemeral storage, catalog refresh, and memory-cache management.
 
 GEMs are distinct from reimbursement mappings and other conversion tables. Catalog
 discovery excludes those artifacts.

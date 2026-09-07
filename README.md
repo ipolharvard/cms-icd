@@ -52,8 +52,8 @@ The knowledge base provides separate views for:
 - `icd.cm`: ICD-10-CM codes, hierarchy, index, and guidelines;
 - `icd.pcs`: ICD-10-PCS codes, hierarchy, index, and guidelines.
 
-See the [documentation](https://ipolharvard.github.io/cms-icd/) for code
-navigation, index lookup, and guideline access.
+See [Work with ICD-10 materials](https://ipolharvard.github.io/cms-icd/guide/icd10-materials/)
+for code navigation, index lookup, instructional notes, and guideline access.
 
 ## Choose an exact release
 
@@ -75,7 +75,7 @@ April update. If a material did not change in the update, `cms-icd` uses the
 most recent earlier material from the same fiscal year.
 
 Release selection is strict by default. The
-[release guide](https://ipolharvard.github.io/cms-icd/guide/releases-and-caching/)
+[release guide](https://ipolharvard.github.io/cms-icd/guide/releases/)
 explains available years, midyear updates, and explicit fallback behavior.
 
 ## Use General Equivalence Mappings
@@ -153,7 +153,9 @@ icd = ICD10KnowledgeBase.for_date(
 
 Use `ICD10KnowledgeBase.from_directory()` or
 `GEMKnowledgeBase.from_directory()` when you already manage the original CMS
-files yourself.
+files yourself. See the
+[caching guide](https://ipolharvard.github.io/cms-icd/guide/caching/) for
+ephemeral caches, memory-cache management, catalog refresh, and cache integrity.
 
 ## Citation and acknowledgment
 
