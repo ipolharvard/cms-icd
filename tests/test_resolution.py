@@ -605,6 +605,10 @@ def test_fingerprintless_store_keys_are_stable_under_object_lifetime(
     assert retained() is not None
     assert len(_resolution_cache) == 2
 
+    clear_memory_caches(MemoryCache.RESOLUTION)
+
+    assert retained() is None
+
 
 def test_empty_bulk_request_does_not_load_materials(
     monkeypatch: pytest.MonkeyPatch,
