@@ -6,40 +6,63 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
         with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.10"
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -e ".[dev]"
-      - run: pre-commit run --all-files
+          enable-cache: true
+      - run: uv venv --python 3.12
+      - run: uv pip install --python .venv/bin/python -e ".[dev]"
+      - run: .venv/bin/pre-commit run --all-files
 
   tests:
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(github.event_name == 'push' && '["3.12", "3.13", "3.14"]' || '["3.12"]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
         with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.10"
           python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -e ".[dev]"
-      - run: pytest
+          enable-cache: true
+      - run: uv venv --python "${{ matrix.python-version }}"
+      - run: uv pip install --python .venv/bin/python -e ".[dev]"
+      - run: .venv/bin/python -m pytest
 
   package:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
         with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.10"
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+          enable-cache: true
       - run: uv build
       - run: uvx --from twine twine check --strict dist/*
       - name: Install and inspect wheel

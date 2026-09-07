@@ -15,15 +15,19 @@ jobs:
     env:
       CMS_ICD_DIAGNOSTIC_DIR: .cms-diagnostics/catalog
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
         with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.10"
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -e ".[dev]"
-      - run: pytest -q --tb=line -m live_catalog tests/live
+          enable-cache: true
+      - run: uv venv --python 3.12
+      - run: uv pip install --python .venv/bin/python -e ".[dev]"
+      - run: .venv/bin/python -m pytest -q --tb=line -m live_catalog tests/live
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: cms-catalog-diagnostics
           path: .cms-diagnostics/catalog
