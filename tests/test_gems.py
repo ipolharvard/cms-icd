@@ -285,9 +285,12 @@ def test_parse_gems_rejects_invalid_records(tmp_path: Path, record: str) -> None
 @pytest.mark.parametrize(
     ("filename", "system", "direction", "record"),
     [
-        # ICD-9-CM diagnosis codes are 3-5 digits, optionally V- or E-prefixed.
+        # ICD-9-CM diagnosis codes are 3-5 digits; V codes have 2-4 digits
+        # after the prefix, while E codes have 3-4 digits.
         ("2018_I9gem.txt", "cm", GEMDirection.ICD9_TO_ICD10, "A000 0010 10000"),
+        ("2018_I9gem.txt", "cm", GEMDirection.ICD9_TO_ICD10, "E12 A000 10000"),
         ("2018_I10gem.txt", "cm", GEMDirection.ICD10_TO_ICD9, "A000 V0 10000"),
+        ("2018_I10gem.txt", "cm", GEMDirection.ICD10_TO_ICD9, "A000 E12 10000"),
         # ICD-10-CM codes start with a letter, a digit, and 1-5 more
         # alphanumeric characters.
         ("2018_I9gem.txt", "cm", GEMDirection.ICD9_TO_ICD10, "0010 BADCODE 10000"),

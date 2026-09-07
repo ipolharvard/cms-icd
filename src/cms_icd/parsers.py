@@ -33,7 +33,7 @@ _GEM_FILENAMES: dict[tuple[str, GEMDirection], tuple[str, ...]] = {
 
 # Official GEM files encode codes without dots or separators. Matching is
 # case-insensitive because a few official rows use lowercase letters.
-_ICD9_CM_DIAGNOSIS = re.compile(r"[VE]\d{2,4}|\d{3,5}")
+_ICD9_CM_DIAGNOSIS = re.compile(r"E\d{3,4}|V\d{2,4}|\d{3,5}")
 _ICD9_CM_PROCEDURE = re.compile(r"\d{3,4}")
 _ICD10_CM_DIAGNOSIS = re.compile(r"[A-Z]\d[A-Z0-9]{1,5}")
 _ICD10_PCS_CODE = re.compile(f"[{''.join(ICD10_PCS_CHARACTERS)}]{{7}}")
