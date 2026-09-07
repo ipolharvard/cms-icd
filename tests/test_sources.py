@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -645,6 +646,82 @@ def test_reclaim_restores_lock_whose_marker_landed_before_rename(
 
     assert lock.exists()
     assert (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii") == str(os.getpid())
+
+
+def test_reclaim_preserves_moved_live_holder_when_lock_was_reacquired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "catalog.json.lock"
+    lock.mkdir()
+    moved_holder = f"{os.getpid()} moved-holder"
+    (lock / _LOCK_MARKER_NAME).write_text(moved_holder, encoding="ascii")
+
+    def mark_moved_holder_live(leftover: Path) -> bool:
+        lock.mkdir()
+        (lock / _LOCK_MARKER_NAME).write_text(
+            f"{os.getpid()} new-holder", encoding="ascii"
+        )
+        return False
+
+    monkeypatch.setattr("cms_icd.sources._lock_is_stale", mark_moved_holder_live)
+
+    assert not _reclaim_stale_lock(lock)
+
+    leftovers = list(tmp_path.glob("catalog.json.lock.stale.*"))
+    assert len(leftovers) == 1
+    assert (leftovers[0] / _LOCK_MARKER_NAME).read_text(
+        encoding="ascii"
+    ) == moved_holder
+    assert (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii").endswith("new-holder")
+
+
+def test_overlapping_same_process_releases_use_unique_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "catalog.json"
+    holder_acquired = Event()
+    release_holder = Event()
+    first_release_moved = Event()
+    finish_first_release = Event()
+    errors: list[BaseException] = []
+    original_rmtree = shutil.rmtree
+    release_calls = 0
+
+    def pause_first_release(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal release_calls
+        if ".released." in Path(path).name:
+            release_calls += 1
+            if release_calls == 1:
+                first_release_moved.set()
+                finish_first_release.wait(10)
+        original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr("cms_icd.sources.shutil.rmtree", pause_first_release)
+
+    def hold() -> None:
+        try:
+            with _directory_lock(target):
+                holder_acquired.set()
+                release_holder.wait(10)
+        except BaseException as error:
+            errors.append(error)
+
+    holder = Thread(target=hold)
+    holder.start()
+    try:
+        assert holder_acquired.wait(10)
+        release_holder.set()
+        assert first_release_moved.wait(10)
+        with _directory_lock(target):
+            pass
+    finally:
+        finish_first_release.set()
+        holder.join(10)
+
+    assert not errors
+    assert not holder.is_alive()
+    assert not (tmp_path / "catalog.json.lock").exists()
+    assert not list(tmp_path.glob("catalog.json.lock.released.*"))
 
 
 def test_unknown_fallback_value_is_rejected() -> None:

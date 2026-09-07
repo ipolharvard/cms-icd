@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import Future
 from contextlib import contextmanager
@@ -422,8 +423,9 @@ def _linux_process_stats(pid: int) -> tuple[str, float] | None:
 def _lock_holder_pid(lock: Path) -> int | None:
     """Return the PID recorded in a lock directory, or None if absent."""
     try:
-        pid = int((lock / _LOCK_MARKER_NAME).read_text(encoding="ascii").strip())
-    except (OSError, ValueError):
+        marker = (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii").split()
+        pid = int(marker[0])
+    except (OSError, ValueError, IndexError):
         return None
     return pid if pid > 0 else None
 
@@ -438,8 +440,8 @@ def _lock_is_stale(lock: Path) -> bool:
         # An unreadable marker is not proof that the holder is gone.
         return False
     try:
-        holder = int(raw.strip())
-    except ValueError:
+        holder = int(raw.split()[0])
+    except (ValueError, IndexError):
         return True
     if holder <= 0 or not _pid_is_alive(holder):
         return True
@@ -459,11 +461,11 @@ def _lock_is_stale(lock: Path) -> bool:
     return started > acquired + _LOCK_PID_REUSE_MARGIN_SECONDS
 
 
-def _write_lock_holder(lock: Path, pid: int) -> None:
-    """Atomically record the holder PID inside the lock directory."""
+def _write_lock_holder(lock: Path, marker: str) -> None:
+    """Atomically record the holder identity inside an unpublished lock."""
     with NamedTemporaryFile(dir=lock, prefix="pid.", delete=False) as handle:
         temporary = Path(handle.name)
-        handle.write(str(pid).encode("ascii"))
+        handle.write(marker.encode("ascii"))
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, lock / _LOCK_MARKER_NAME)
@@ -478,7 +480,7 @@ def _reclaim_stale_lock(lock: Path) -> bool:
     lock to an in-flight reclaim. Return True when the lock was removed.
     """
     try:
-        leftover = lock.with_name(f"{lock.name}.stale.{os.getpid()}")
+        leftover = lock.with_name(f"{lock.name}.stale.{os.getpid()}.{uuid.uuid4().hex}")
         lock.rename(leftover)
     except OSError:
         return False
@@ -486,9 +488,11 @@ def _reclaim_stale_lock(lock: Path) -> bool:
         try:
             leftover.rename(lock)
         except OSError:
-            # The lock name was taken in the meantime; the orphaned holder
-            # directory cannot be restored, so remove it.
-            shutil.rmtree(leftover, ignore_errors=True)
+            # The lock name was taken in the meantime. Preserve the moved live
+            # holder rather than deleting another acquisition's ownership
+            # record. Locks created by this module are published with their
+            # marker already present, so only legacy writers can reach here.
+            pass
         return False
     shutil.rmtree(leftover, ignore_errors=True)
     return True
@@ -500,22 +504,28 @@ def _directory_lock(
 ) -> Iterable[None]:
     """Serialize cache mutations across processes with a sibling lock directory.
 
-    The holder records its PID inside the lock directory. A lock whose marker is missing
-    or whose recorded PID is dead, a zombie, or a PID reused for a newer process is
-    holder-less and reclaimed immediately, so a killed process cannot permanently block
-    a cache destination. A lock held by a live process is waited on for up to
-    ``timeout`` seconds; the default is sized to outlast a healthy download, extraction,
-    or parse. A timeout names the live holder PID (or notes that no live holder could be
-    removed) so a stuck holder can be found. Release renames the whole directory aside
-    atomically, so a releasing holder never leaves a marker-less window that a waiter
-    could mistake for a stale lock.
+    The holder records its PID and a unique acquisition token inside the lock directory.
+    A lock whose marker is missing or whose recorded PID is dead, a zombie, or a PID
+    reused for a newer process is holder-less and reclaimed immediately, so a killed
+    process cannot permanently block a cache destination. A lock held by a live process
+    is waited on for up to ``timeout`` seconds; the default is sized to outlast a
+    healthy download, extraction, or parse. A timeout names the live holder PID (or
+    notes that no live holder could be removed) so a stuck holder can be found. Each
+    fully initialized directory is published atomically, and release removes it only
+    while its unique token still proves ownership.
     """
     lock = path.with_suffix(path.suffix + ".lock")
     deadline = time.monotonic() + timeout
+    token = uuid.uuid4().hex
+    marker = f"{os.getpid()} {token}"
+    candidate = lock.with_name(f"{lock.name}.acquire.{os.getpid()}.{token}")
     while True:
         try:
-            lock.mkdir(parents=True)
-        except FileExistsError:
+            candidate.mkdir(parents=True)
+            _write_lock_holder(candidate, marker)
+            candidate.rename(lock)
+        except OSError:
+            shutil.rmtree(candidate, ignore_errors=True)
             stale = _lock_is_stale(lock)
             reclaimed = _reclaim_stale_lock(lock) if stale else False
             if time.monotonic() >= deadline and not reclaimed:
@@ -530,35 +540,29 @@ def _directory_lock(
                 ) from None
             time.sleep(_LOCK_RETRY_SECONDS)
             continue
-        try:
-            _write_lock_holder(lock, os.getpid())
-        except FileNotFoundError:
-            # The marker-less creation window was reclaimed while we were
-            # recording the holder; retry the acquisition.
-            if time.monotonic() >= deadline:
-                raise DownloadError(
-                    f"Timed out after {timeout:g}s waiting for cache lock: {lock}"
-                ) from None
-            continue
-        except OSError:
-            # Only remove the lock when its marker identifies this process;
-            # a missing or foreign marker may belong to a concurrent holder.
-            if _lock_holder_pid(lock) == os.getpid():
-                shutil.rmtree(lock, ignore_errors=True)
-            raise DownloadError(
-                f"Unable to record holder in cache lock: {lock}"
-            ) from None
         break
     try:
         yield
     finally:
         try:
-            leftover = lock.with_name(f"{lock.name}.released.{os.getpid()}")
-            lock.rename(leftover)
+            owns_lock = (lock / _LOCK_MARKER_NAME).read_text(encoding="ascii") == marker
         except OSError:
-            pass
-        else:
-            shutil.rmtree(leftover, ignore_errors=True)
+            owns_lock = False
+        if owns_lock:
+            leftover = lock.with_name(f"{lock.name}.released.{os.getpid()}.{token}")
+            try:
+                lock.rename(leftover)
+            except OSError:
+                pass
+            else:
+                try:
+                    owns_leftover = (leftover / _LOCK_MARKER_NAME).read_text(
+                        encoding="ascii"
+                    ) == marker
+                except OSError:
+                    owns_leftover = False
+                if owns_leftover:
+                    shutil.rmtree(leftover, ignore_errors=True)
 
 
 class CMSProvider(MaterialProvider):
