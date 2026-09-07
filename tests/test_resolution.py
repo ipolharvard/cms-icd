@@ -13,7 +13,8 @@ from cms_icd import (
     GEMStore,
     ICDMappingReason,
     ICDMappingStatus,
-    clear_resolution_memory_cache,
+    MemoryCache,
+    clear_memory_caches,
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
@@ -644,6 +645,6 @@ def test_clear_resolution_memory_cache_empties_populated_cache(
     assert resolved["0020"].target_codes == ("A70",)
     assert len(_resolution_cache) > entries_before
 
-    clear_resolution_memory_cache()
+    clear_memory_caches(MemoryCache.RESOLUTION)
 
     assert not _resolution_cache

@@ -194,18 +194,18 @@ network access and requires the selected catalog and artifacts to exist in the
 chosen cache directory.
 
 The in-memory caches follow the same process-lifetime rule: shared catalog
-entries are retained per cache directory, and parsed stores are retained per
-derived entry, until the process exits or the application releases them. When
-cycling through distinct cache directories, such as per-use temporary
-directories, release that state explicitly:
+entries, parsed stores, and mapping resolutions remain retained until the
+process exits or the application releases them. When cycling through distinct
+cache directories, such as per-use temporary directories, release that state
+explicitly:
 
 ```python
-from cms_icd import clear_catalog_memory_cache, clear_memory_cache
+from cms_icd import clear_memory_caches
 
-clear_catalog_memory_cache()
-clear_memory_cache()
+clear_memory_caches()
 ```
 
+Pass `MemoryCache` members or their string values to clear only selected layers.
 Releasing in-memory state does not modify the persistent cache files.
 
 The downloaded catalog is also persistent and is reused until explicitly
