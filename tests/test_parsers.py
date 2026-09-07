@@ -421,7 +421,7 @@ class _PcsPage:
             "ICD-10-PCS Official Guidelines for Coding and Reporting\n"
             "FY 2026\n"
             "Page 1 of 2\n"
-            "Body cites the ICD-10-PCS Official Guidelines.\n"
+            "Body cites the ICD-10-PCS Official Guidelines for Coding and Reporting.\n"
             "Page 1 of 2\n"
         )
 
@@ -451,7 +451,9 @@ def test_guideline_page_text_removes_only_positioned_footer() -> None:
 def test_guideline_page_text_removes_pcs_running_header() -> None:
     text = _page_text(_PcsPage(), "pcs")  # type: ignore[arg-type]
 
-    assert text == "Body cites the ICD-10-PCS Official Guidelines."
+    assert text == (
+        "Body cites the ICD-10-PCS Official Guidelines for Coding and Reporting."
+    )
 
 
 def test_text_position_applies_page_transformation() -> None:
