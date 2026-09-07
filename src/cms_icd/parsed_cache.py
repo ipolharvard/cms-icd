@@ -142,7 +142,8 @@ def _load_or_build[T](
     except BaseException as exc:
         future.set_exception(exc)
         with _memory_lock:
-            _memory.pop(memory_key, None)
+            if _memory.get(memory_key) is future:
+                _memory.pop(memory_key, None)
         raise
 
 

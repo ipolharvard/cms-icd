@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from datetime import date
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -166,3 +168,62 @@ def test_distinct_cache_directories_are_evictable_and_warm_reuse_works(
     reloaded = load_gem_store(providers[1], "cm", GEMDirection.ICD9_TO_ICD10)
     assert reloaded["0010"] == stores[1]["0010"]
     assert len(_memory) == 1
+
+
+def test_failed_build_does_not_remove_replacement_after_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gem_path = tmp_path / "2018_I9gem.txt"
+    gem_path.write_text("0010 A000 10000\n", encoding="ascii")
+    provider = _provider(tmp_path / "cache", (gem_path,))
+    first_build_started = Event()
+    release_first_build = Event()
+    build_count = 0
+    results: list[GEMStore] = []
+    errors: list[BaseException] = []
+
+    def parse(*_args: object, **_kwargs: object) -> GEMStore:
+        nonlocal build_count
+        build_count += 1
+        if build_count == 1:
+            first_build_started.set()
+            release_first_build.wait(10)
+            raise RuntimeError("first build failed")
+        return GEMStore(
+            {"0010": (GEMEntry("0010", "A000", True, False, False, 0, 0),)},
+            system="cm",
+            direction=GEMDirection.ICD9_TO_ICD10,
+            release=provider.release,
+        )
+
+    monkeypatch.setattr("cms_icd.parsed_cache.parse_gems", parse)
+
+    def load() -> None:
+        try:
+            results.append(load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10))
+        except BaseException as error:
+            errors.append(error)
+
+    clear_memory_cache()
+    first = Thread(target=load)
+    first.start()
+    assert first_build_started.wait(10)
+
+    clear_memory_cache()
+    second = Thread(target=load)
+    second.start()
+    deadline = time.monotonic() + 10
+    while not _memory and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert len(_memory) == 1
+
+    release_first_build.set()
+    first.join(10)
+    second.join(10)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert [type(error) for error in errors] == [RuntimeError]
+    assert len(results) == 1
+    assert len(_memory) == 1
+    assert load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10) is results[0]
