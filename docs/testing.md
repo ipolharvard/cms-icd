@@ -124,6 +124,16 @@ advertised release and material:
 make test-live-exhaustive
 ```
 
+By default the audit covers every advertised fiscal year. To limit a local run,
+set `CMS_ICD_EXHAUSTIVE_YEARS` to a comma-separated list:
+
+```bash
+CMS_ICD_EXHAUSTIVE_YEARS=2017,2019 make test-live-exhaustive
+```
+
+Unavailable years and values that are not integers are rejected instead of silently
+running an empty audit.
+
 Run it before changing catalog discovery, archive patterns, or parsers, and
 before claiming support for a newly published fiscal year. Results are written
 to `.cms-diagnostics/exhaustive-results.json`.
