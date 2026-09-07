@@ -98,11 +98,11 @@ def test_cm_and_pcs_view_creation_is_race_free(
     )
     pcs = tmp_path / "icd10pcs_tables.xml"
     pcs.write_text(
-        "<ICD10PCS.tables><pcsTable>"
+        "<ICD10PCS.tabular><pcsTable>"
         '<axis><label code="0">Section</label><title>Section</title></axis>'
         '<pcsRow><axis values="1"><title>Section</title>'
         '<label code="0">Medical and Surgical</label></axis></pcsRow>'
-        "</pcsTable></ICD10PCS.tables>"
+        "</pcsTable></ICD10PCS.tabular>"
     )
     kb = ICD10KnowledgeBase.from_directory(
         tmp_path,
