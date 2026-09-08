@@ -51,6 +51,16 @@ as an immutable tuple in deterministic scenario/choice/target order. A few offic
 reverse PCS releases omit the no-map flag on `NoI9` rows; the parser treats the sentinel
 as authoritative and normalizes those rows to `no_map=True`.
 
+## Canonical code case
+
+Official GEM files are validated case-insensitively, and a few official rows use
+lowercase letters. The parser normalizes every code to uppercase canonical case
+before storage: `GEMStore` keys, `GEMEntry.source`, and `GEMEntry.target` are
+always uppercase, and downstream lookups and release comparisons treat that
+case as significant. ICD-9-CM codes are numeric and are unaffected. A lowercase
+row therefore parses to the same key and target as its uppercase spelling and
+remains reachable by canonical-case lookup.
+
 ## Reproducible and offline use
 
 Select a fiscal year explicitly; GEMs are fiscal-year artifacts and do not use the
@@ -150,8 +160,9 @@ authoritative one-to-one clinical conversion:
 - complete combination mappings retain every required target and its order;
 - procedure alternatives retain shared axes and use `?` where later axes
   disagree;
-- incompatible alternatives, invalid targets, and official no-map rows return
-  an `unmappable` status with empty targets.
+- incompatible alternatives, invalid targets, diagnosis targets missing from
+  the selected tabular vocabulary, and official no-map rows return an
+  `unmappable` status with empty targets.
 
 Every resolution includes a reason and the corrected GEM provenance. Unknown
 source codes are absent from the mapping; callers choose their own missing-code

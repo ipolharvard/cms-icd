@@ -67,6 +67,24 @@ def test_parse_gems_preserves_codes_flags_and_alternatives(tmp_path: Path) -> No
     assert store.release == release
 
 
+def test_parse_gems_normalizes_lowercase_rows_to_canonical_case(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "2018_I9gem.txt").write_text("4860 r311 10000\n", encoding="ascii")
+    (tmp_path / "2018_I10gem.txt").write_text("r311 4860 10000\n", encoding="ascii")
+    (tmp_path / "gem_i9pcs.txt").write_text("0010 0abc0zz 10000\n", encoding="ascii")
+
+    paths = tuple(tmp_path.iterdir())
+    forward = parse_gems(paths, system="cm", direction=GEMDirection.ICD9_TO_ICD10)
+    reverse = parse_gems(paths, system="cm", direction=GEMDirection.ICD10_TO_ICD9)
+    pcs = parse_gems(paths, system="pcs", direction=GEMDirection.ICD9_TO_ICD10)
+
+    assert forward["4860"][0].target == "R311"
+    assert forward.mapping("4860").simple_alternatives[0].target == "R311"
+    assert reverse["R311"][0].target == "4860"
+    assert pcs["0010"][0].target == "0ABC0ZZ"
+
+
 def test_gem_knowledge_base_loads_systems_and_directions_lazily(
     tmp_path: Path,
 ) -> None:
@@ -275,6 +293,43 @@ def test_retrospective_corrections_apply_only_before_lifecycle_boundary() -> Non
         corrected.provenance("lifecycle").blocked_by_code_lifecycle_release.fiscal_year
         == 2017
     )
+
+
+def test_retrospective_corrections_treat_cross_release_case_as_same_code(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "fy2016"
+    second = tmp_path / "fy2017"
+    first.mkdir()
+    second.mkdir()
+    (first / "2016_I9gem.txt").write_text("4860 r311 10000\n", encoding="ascii")
+    (first / "2016_I10gem.txt").write_text("r311 4860 10000\n", encoding="ascii")
+    (second / "2017_I9gem.txt").write_text("4860 R311 00000\n", encoding="ascii")
+    (second / "2017_I10gem.txt").write_text("R311 4860 10000\n", encoding="ascii")
+
+    def store(directory: Path, year: int, direction: GEMDirection) -> GEMStore:
+        return parse_gems(
+            tuple(directory.iterdir()),
+            system="cm",
+            direction=direction,
+            release=Release(year, date(year - 1, 10, 1)),
+        )
+
+    corrected = _backport_corrections(
+        [
+            store(first, 2016, GEMDirection.ICD9_TO_ICD10),
+            store(second, 2017, GEMDirection.ICD9_TO_ICD10),
+        ],
+        [
+            set(store(first, 2016, GEMDirection.ICD10_TO_ICD9)),
+            set(store(second, 2017, GEMDirection.ICD10_TO_ICD9)),
+        ],
+    )
+
+    assert corrected["4860"][0].target == "R311"
+    assert corrected["4860"][0].approximate is False
+    assert corrected.provenance("4860").selected_mapping_release.fiscal_year == 2017
+    assert corrected.provenance("4860").blocked_by_code_lifecycle_release is None
 
 
 def test_retrospective_corrections_do_not_resume_after_mixed_change() -> None:

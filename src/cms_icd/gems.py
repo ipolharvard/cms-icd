@@ -332,7 +332,9 @@ def _backport_corrections(
     A source is adopted from a later release only while it stays present in every year's
     store, unblocked, and lineage-equal: ``values`` always holds the adopted lineage,
     the unchanged-skip and adoption steps both preserve that invariant, and ``blocked``
-    only grows, so a blocked source never resumes.
+    only grows, so a blocked source never resumes. Stores and universes contain the
+    uppercase canonical case produced by ``parse_gems``; the lifecycle comparisons are
+    case-sensitive against that canonical form.
     """
     if len(stores) != len(target_universes) or not stores:
         raise ValueError("A target universe is required for every GEM store")
