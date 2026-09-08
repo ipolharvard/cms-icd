@@ -764,3 +764,88 @@ def test_cm_guideline_leaf_content_excludes_its_own_heading() -> None:
     assert chapter_rendered.count("### I.C.9: Ninth rule") == 1
     assert "9. Ninth rule" not in chapter_rendered
     assert chapter_rendered.count("Ninth rule") == 1
+
+
+def test_guideline_page_text_joins_only_plausible_code_shapes() -> None:
+    page = _GuidelinePage(
+        "Administer a dose of A 100 mg with water.\n"
+        "See table A 10. for details.\n"
+        "Vitamin E 400 IU was given.\n"
+        "Code I 10.9 applies here.\n"
+        "Group I 10 is referenced.\n"
+    )
+
+    text = _page_text(page)  # type: ignore[arg-type]
+
+    assert text == (
+        "Administer a dose of A 100 mg with water.\n"
+        "See table A 10. for details.\n"
+        "Vitamin E 400 IU was given.\n"
+        "Code I10.9 applies here.\n"
+        "Group I10 is referenced."
+    )
+
+
+class _BareSectionRuleReader:
+    """A numbered rule listed directly under a section without a lettered subsection."""
+
+    def __init__(self) -> None:
+        self.pages = [
+            _GuidelinePage("Section I. Conventions\n1. First rule\nRule body"),
+        ]
+        self.outline = [
+            _Destination("Section I. Conventions", 0),
+            [_Destination("1. First rule", 0)],
+        ]
+
+    def get_destination_page_number(self, destination: _Destination) -> int:
+        return destination.page
+
+
+def test_cm_guidelines_parse_numbered_rule_under_bare_section() -> None:
+    reader = _BareSectionRuleReader()
+    store = _structured_cm_guidelines(  # type: ignore[arg-type]
+        reader, "guidelines.pdf"
+    )
+
+    assert store.titles == {"I": "Conventions", "I.1": "First rule"}
+    assert set(store) == {"I.1"}
+    assert store["I.1"].content == "Rule body"
+
+
+class _MissingHeadingReader:
+    """An outline leaf whose heading text is absent from the extracted page text."""
+
+    def __init__(self) -> None:
+        self.pages = [
+            _GuidelinePage(
+                "Section I. Conventions\n"
+                "A. Basic conventions\n"
+                "Orphan body of the missing rule.\n"
+                "2. Second rule\n"
+                "Body of second rule."
+            ),
+        ]
+        self.outline = [
+            _Destination("Section I. Conventions", 0),
+            [
+                _Destination("A. Basic conventions", 0),
+                [
+                    _Destination("1. Zephyr rule", 0),
+                    _Destination("2. Second rule", 0),
+                ],
+            ],
+        ]
+
+    def get_destination_page_number(self, destination: _Destination) -> int:
+        return destination.page
+
+
+def test_cm_guidelines_reject_unlocatable_entry_heading() -> None:
+    reader = _MissingHeadingReader()
+
+    with pytest.raises(
+        ParseError,
+        match=re.escape("Could not locate guideline entry I.A.1"),
+    ):
+        _structured_cm_guidelines(reader, "guidelines.pdf")  # type: ignore[arg-type]

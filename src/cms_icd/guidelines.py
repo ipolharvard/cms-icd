@@ -75,7 +75,10 @@ def _page_text(page: PageObject, system: str = "cm") -> str:
         flags=re.I,
     )
     text = re.sub(r"(?<=\d)\s+(st|nd|rd|th)\b", r"\1", text)  # codespell:ignore nd
-    text = re.sub(r"\b([A-Z])\s+(?=\d{2}(?:\d|\.))", r"\1", text)
+    # Rejoin a word-initial letter that a font split from a code, but only when the
+    # result is a plausible ICD-10 code: a letter, exactly two digits, and an
+    # optional decimal. Longer numerals and bare dots are prose and stay intact.
+    text = re.sub(r"\b([A-Z])\s+(?=\d{2}(?:\.\d|(?![\d.])))", r"\1", text)
     # Some CMS fonts place artificial word boundaries inside these words.
     text = text.replace("Tabular L ist", "Tabular List")  # codespell:ignore ist
     text = re.sub(r"\bap\s+propriate\b", "appropriate", text)
@@ -141,7 +144,8 @@ def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> Guidelin
         if fixed_depth:
             section_match = _SECTION.search(raw_title) if level == 1 else None
             subsection_match = _SUBSECTION.match(raw_title) if level == 2 else None
-            number_match = _NUMBER.match(raw_title) if level == 3 else None
+            # Level 2 numbers skip the lettered subsection level entirely.
+            number_match = _NUMBER.match(raw_title) if level in (2, 3) else None
         else:
             if _TOC_LEADER.search(raw_title):
                 continue
@@ -187,9 +191,10 @@ def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> Guidelin
                 }
             )
             seen_keys.add(key)
-        elif current_subsection and number_match:
+        elif current_section and number_match:
             match = number_match
-            key = f"{current_subsection}.{match.group(1)}"
+            parent = current_subsection or current_section
+            key = f"{parent}.{match.group(1)}"
             semantic_level = 3
             if not fixed_depth and key in seen_keys:
                 continue
@@ -220,19 +225,21 @@ def _structured_cm_guidelines(document: PdfReader, path: str | Path) -> Guidelin
         heading = "".join(words)
         pattern = r"\s*".join(re.escape(character) for character in heading)
         match = re.search(pattern, full_text[search_from:], re.I | re.M)
-        entry["position"] = search_from + match.start() if match else None
-        if match:
-            search_from = int(entry["position"])
+        if match is None:
+            raise ParseError(
+                f"Could not locate guideline entry {entry['key']!s} "
+                f"({str(entry['raw_title'])!r}) in the text of {path}"
+            )
+        entry["position"] = search_from + match.start()
+        search_from = int(entry["position"])
     titles = {str(entry["key"]): str(entry["title"]) for entry in entries}
     guidelines: dict[str, Guideline] = {}
     preambles: dict[str, str] = {}
     for index, entry in enumerate(entries):
-        position = entry["position"]
-        if position is None:
-            continue
-        later = [item for item in entries[index + 1 :] if item["position"] is not None]
+        position = int(entry["position"])
+        later = entries[index + 1 :]
         end = int(later[0]["position"]) if later else len(full_text)
-        content = full_text[int(position) : end].strip()
+        content = full_text[position:end].strip()
         key = str(entry["key"])
         if entry["leaf"]:
             guidelines[key] = Guideline(
