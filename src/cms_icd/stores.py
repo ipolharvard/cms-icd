@@ -212,7 +212,11 @@ class TabularStore(ReadOnlyStore[Node]):
 
     @property
     def lookup(self) -> Mapping[str, str]:
-        """Map normalized ICD code strings to tabular node identifiers."""
+        """Map raw node names, as stored, to tabular node identifiers.
+
+        Dot-stripped compact forms are not keys; use :meth:`by_code` or
+        :meth:`contains_code` for format-tolerant resolution.
+        """
         return self._code_lookup
 
     @property
@@ -223,6 +227,14 @@ class TabularStore(ReadOnlyStore[Node]):
     def by_code(self, code: str) -> Node:
         """Return the node for a dotted or compact ICD code."""
         return self[self._node_id(code)]
+
+    def contains_code(self, code: str) -> bool:
+        """Return whether a dotted or compact ICD code resolves to a Code node."""
+        try:
+            node = self.by_code(code)
+        except KeyError:
+            return False
+        return isinstance(node, Code)
 
     def parents(self, code_or_id: str) -> tuple[Node, ...]:
         """Return parents from the immediate parent to the root."""

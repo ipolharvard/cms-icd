@@ -134,8 +134,8 @@ class _SystemKnowledgeBase:
         return node
 
     def __contains__(self, code: object) -> bool:
-        """Return whether a code exists in the tabular list."""
-        return isinstance(code, str) and code in self.lookup
+        """Return whether a dotted or compact code resolves to a tabular Code."""
+        return isinstance(code, str) and self.tabular.contains_code(code)
 
     def __repr__(self) -> str:
         """Return a representation without loading any material."""
@@ -203,6 +203,10 @@ class _SystemKnowledgeBase:
     def get_term_codes(self, term_id: str, subterms: bool = False) -> list[str]:
         """Resolve an index term to deterministic ICD code strings.
 
+        Term code values are resolved with the same dotted-or-compact
+        tolerance as :meth:`TabularStore.by_code`; values that do not
+        resolve to a Code are skipped.
+
         Args:
             term_id: Alphabetic-index term identifier.
             subterms: Include codes reachable from descendant terms.
@@ -213,12 +217,13 @@ class _SystemKnowledgeBase:
         codes: set[str] = set()
         for term in terms:
             for value in (term.code, term.manifestation_code):
-                if not value:
+                if not value or not self.tabular.contains_code(value):
                     continue
-                if value in self.lookup and self.tabular.by_code(value).assignable:
-                    codes.add(value)
-                elif value in self.lookup:
-                    codes.update(node.name for node in self.tabular.leaves(value))
+                node = self.tabular.by_code(value)
+                if node.assignable:
+                    codes.add(node.name)
+                else:
+                    codes.update(leaf.name for leaf in self.tabular.leaves(value))
         return sorted(codes)
 
     def get_instructional_notes(self, codes: list[str]) -> list[dict[str, object]]:
