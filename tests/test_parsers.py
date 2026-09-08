@@ -15,9 +15,9 @@ from cms_icd.guidelines import (
     parse_guidelines,
 )
 from cms_icd.knowledge_base import ICD10CMKnowledgeBase
-from cms_icd.models import Code, Node
+from cms_icd.models import Code, Node, Term
 from cms_icd.parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
-from cms_icd.stores import TabularStore
+from cms_icd.stores import IndexStore, TabularStore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -209,6 +209,23 @@ def test_index_parser_cell_non_numeric_col_raises_parse_error(tmp_path: Path) ->
 
     with pytest.raises(ParseError, match=re.escape(path.name)):
         parse_index((path,), system="cm")
+
+
+def test_index_parser_cell_duplicate_col_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(
+        INDEX_CELL_XML.replace(
+            '<cell col="1">I10</cell>',
+            '<cell col="1">I10</cell>\n      <cell col="1">I20</cell>',
+        )
+    )
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_index((path,), system="cm")
+
+    message = str(excinfo.value)
+    assert path.name in message
+    assert "Hypertension" in message
 
 
 def test_index_parser_head_missing_col_raises_parse_error(tmp_path: Path) -> None:
@@ -429,6 +446,72 @@ def test_main_term_id_resolves_cells_at_any_depth(tmp_path: Path) -> None:
         "000001.0.0X2",
     }
     assert all(term.main_term_id == main.id for term in store.values())
+
+
+def test_index_parser_children_ids_are_tuples_equal_to_hand_built_store(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(INDEX_XML_WITH_CELLS)
+
+    store = parse_index((path,), system="cm")
+
+    assert len(store) == 6
+    for term in store.values():
+        assert type(term.children_ids) is tuple
+
+    expected = IndexStore(
+        {
+            term.id: term
+            for term in (
+                Term(
+                    "000001",
+                    "Fever",
+                    children_ids=("000001X1", "000001.0"),
+                    path="Fever",
+                ),
+                Term(
+                    "000001X1",
+                    "Column 1",
+                    parent_id="000001",
+                    path="Fever, Column 1",
+                    code="R50.9",
+                    assignable=True,
+                ),
+                Term(
+                    "000001.0",
+                    "with rash",
+                    parent_id="000001",
+                    children_ids=("000001.0X1", "000001.0.0"),
+                    path="Fever, with rash",
+                ),
+                Term(
+                    "000001.0X1",
+                    "Column 1",
+                    parent_id="000001.0",
+                    path="Fever, with rash, Column 1",
+                    code="R05.9",
+                    assignable=True,
+                ),
+                Term(
+                    "000001.0.0",
+                    "chronic",
+                    parent_id="000001.0",
+                    children_ids=("000001.0.0X2",),
+                    path="Fever, with rash, chronic",
+                ),
+                Term(
+                    "000001.0.0X2",
+                    "Column 2",
+                    parent_id="000001.0.0",
+                    path="Fever, with rash, chronic, Column 2",
+                    code="R69.0",
+                    assignable=True,
+                ),
+            )
+        }
+    )
+    assert store == expected
 
 
 class _MediaBox:
