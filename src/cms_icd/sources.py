@@ -668,6 +668,12 @@ class CMSProvider(MaterialProvider):
                 for entry in all_for_year
                 if entry.system == system and entry.material == material
             ]
+            if self.service_date is not None:
+                # A fallback must never cross the coding date: a release
+                # effective after the service date is not in effect.
+                available = [
+                    item for item in available if item.release_date <= self.service_date
+                ]
             if available:
                 selected_date = max(item.release_date for item in available)
                 candidates = [
@@ -695,10 +701,20 @@ class CMSProvider(MaterialProvider):
         )
 
     @staticmethod
-    def _manifest_files(destination: Path, manifest_path: Path) -> tuple[Path, ...]:
-        """Return validated extracted files, or an empty tuple for stale state."""
+    def _manifest_files(
+        destination: Path,
+        manifest_path: Path,
+        expected_url: str | None = None,
+    ) -> tuple[Path, ...]:
+        """Return validated extracted files, or an empty tuple for stale state.
+
+        A manifest that records a source URL different from ``expected_url`` is stale
+        even when every extracted file checksum still matches.
+        """
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if expected_url is not None and manifest.get("url") != expected_url:
+                return ()
             names = manifest["files"]
             checksums = manifest["file_sha256"]
             if (
@@ -717,7 +733,14 @@ class CMSProvider(MaterialProvider):
             ):
                 return ()
             return files
-        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        except (
+            AttributeError,
+            KeyError,
+            OSError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
             return ()
 
     def paths(self, system: str, material: str) -> tuple[Path, ...]:
@@ -730,14 +753,14 @@ class CMSProvider(MaterialProvider):
         destination = self._artifact_dir(entry)
         manifest_path = destination / "manifest.json"
         if manifest_path.exists():
-            files = self._manifest_files(destination, manifest_path)
+            files = self._manifest_files(destination, manifest_path, entry.url)
             if files:
                 return files
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         with _directory_lock(destination):
             if manifest_path.exists():
-                files = self._manifest_files(destination, manifest_path)
+                files = self._manifest_files(destination, manifest_path, entry.url)
                 if files:
                     return files
             staging = destination.with_name(destination.name + ".tmp")
@@ -773,7 +796,7 @@ class CMSProvider(MaterialProvider):
             except Exception:
                 shutil.rmtree(staging, ignore_errors=True)
                 raise
-        files = self._manifest_files(destination, manifest_path)
+        files = self._manifest_files(destination, manifest_path, entry.url)
         if not files:
             raise DownloadError(f"Generated cache manifest is invalid: {manifest_path}")
         return files
