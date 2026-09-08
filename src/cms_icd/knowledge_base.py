@@ -9,7 +9,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Self
 
 from .guidelines import parse_guidelines
-from .models import Code, Guideline, InstructionalNote, Node, Release, Term
+from .models import Code, Guideline, InstructionalNote, Release, Term
 from .parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
 from .sources import CMSProvider, DirectoryProvider, MaterialProvider, fiscal_year_for
 from .stores import GuidelineStore, IndexStore, TabularStore, _natural_sort_key
@@ -168,14 +168,6 @@ class _SystemKnowledgeBase:
         self.load_index()
         self.load_guidelines()
 
-    def get_all_tabular_parents(self, code_or_id: str) -> list[Node]:
-        """Return all tabular parents, immediate parent first.
-
-        This compatibility method returns a list. New code may use
-        :meth:`cms_icd.stores.TabularStore.parents` directly.
-        """
-        return list(self.tabular.parents(code_or_id))
-
     def get_all_tabular_children(self, code_or_id: str) -> list[str]:
         """Return descendant identifiers in depth-first order."""
         return [node.id for node in self.tabular.descendants(code_or_id)]
@@ -310,7 +302,7 @@ class ICD10CMKnowledgeBase(_SystemKnowledgeBase):
         >>> cm = ICD10CMKnowledgeBase.from_stores(tabular=tabular)
         >>> cm["I10"].description
         'Essential hypertension'
-        >>> cm.get_all_tabular_parents("I10")[0].id
+        >>> cm.tabular.parents("I10")[0].id
         'cm'
     """
 

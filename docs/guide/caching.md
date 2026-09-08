@@ -102,9 +102,10 @@ incomplete cache entries are rebuilt automatically.
 
 Parsed GEM stores, retrospectively corrected GEM stores, ICD-10 tabular
 hierarchies, alphabetic indexes, and coding-guideline stores are cached under
-a versioned `_derived` directory. Their compact JSON payloads are checksummed
-and keyed by source-file digests, release metadata, and parser or
-correction-policy versions. Final best-effort mapping resolutions are assembled
-from these reusable stores and retained only for the life of the Python
-process. Corrupt or incompatible derived entries are rebuilt from the validated
-source artifacts.
+`_derived`. Their compact JSON payloads are checksummed and keyed by source-file
+digests and release metadata. The cache records the installed `cms-icd` package
+version; changing versions deletes and rebuilds `_derived` without deleting or
+redownloading official CMS artifacts. Final best-effort mapping resolutions are
+assembled from these reusable stores and retained only for the life of the
+Python process. Corrupt derived entries are rebuilt from the validated source
+artifacts.

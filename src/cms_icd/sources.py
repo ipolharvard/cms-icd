@@ -208,7 +208,7 @@ def refresh_cms_catalog(*, cache_dir: str | Path | None = None) -> None:
     )
 
 
-def clear_catalog_memory_cache() -> None:
+def _clear_catalog_memory_cache() -> None:
     """Clear process-local catalog cache entries.
 
     Shared catalog entries are retained per cache directory for the lifetime of the
@@ -218,9 +218,6 @@ def clear_catalog_memory_cache() -> None:
     """
     with _catalog_lock:
         _catalog_cache.clear()
-
-
-_clear_catalog_memory_cache = clear_catalog_memory_cache
 
 
 def fiscal_year_for(value: date) -> int:

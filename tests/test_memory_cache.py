@@ -10,14 +10,14 @@ def test_clear_memory_caches_clears_every_layer_by_default(
 ) -> None:
     cleared: list[str] = []
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_catalog_memory_cache",
+        "cms_icd.memory_cache._clear_catalog_memory_cache",
         lambda: cleared.append("catalog"),
     )
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_memory_cache", lambda: cleared.append("parsed")
+        "cms_icd.memory_cache._clear_memory_cache", lambda: cleared.append("parsed")
     )
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_resolution_memory_cache",
+        "cms_icd.memory_cache._clear_resolution_memory_cache",
         lambda: cleared.append("resolution"),
     )
 
@@ -31,14 +31,14 @@ def test_clear_memory_caches_accepts_enum_and_string_selectors(
 ) -> None:
     cleared: list[str] = []
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_catalog_memory_cache",
+        "cms_icd.memory_cache._clear_catalog_memory_cache",
         lambda: cleared.append("catalog"),
     )
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_memory_cache", lambda: cleared.append("parsed")
+        "cms_icd.memory_cache._clear_memory_cache", lambda: cleared.append("parsed")
     )
     monkeypatch.setattr(
-        "cms_icd.memory_cache.clear_resolution_memory_cache",
+        "cms_icd.memory_cache._clear_resolution_memory_cache",
         lambda: cleared.append("resolution"),
     )
 

@@ -2,9 +2,9 @@
 
 from enum import StrEnum
 
-from .parsed_cache import clear_memory_cache
-from .resolution import clear_resolution_memory_cache
-from .sources import clear_catalog_memory_cache
+from .parsed_cache import _clear_memory_cache
+from .resolution import _clear_resolution_memory_cache
+from .sources import _clear_catalog_memory_cache
 
 
 class MemoryCache(StrEnum):
@@ -32,9 +32,9 @@ def clear_memory_caches(*caches: MemoryCache | str) -> None:
     """
     selected = tuple(MemoryCache(cache) for cache in caches) or tuple(MemoryCache)
     clear = {
-        MemoryCache.CATALOG: clear_catalog_memory_cache,
-        MemoryCache.PARSED: clear_memory_cache,
-        MemoryCache.RESOLUTION: clear_resolution_memory_cache,
+        MemoryCache.CATALOG: _clear_catalog_memory_cache,
+        MemoryCache.PARSED: _clear_memory_cache,
+        MemoryCache.RESOLUTION: _clear_resolution_memory_cache,
     }
     for cache in dict.fromkeys(selected):
         clear[cache]()

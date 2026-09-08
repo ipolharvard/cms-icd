@@ -1,4 +1,4 @@
-"""Versioned caches for immutable parsed CMS materials."""
+"""Package-scoped caches for immutable parsed CMS materials."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import shutil
 from concurrent.futures import Future
 from datetime import date
+from importlib.metadata import version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Lock
@@ -30,14 +31,8 @@ from .stores import GEMStore, GuidelineStore, IndexStore, TabularStore
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-_CACHE_VERSION = "v1"
-_GEM_SCHEMA = "gem-store-v1"
-_CORRECTED_GEM_SCHEMA = "corrected-gem-store-v1"
-_TABULAR_SCHEMA = "tabular-store-v1"
-_GUIDELINE_SCHEMA = "guideline-store-v1"
-_INDEX_SCHEMA = "index-store-v1"
 _memory_lock = Lock()
-_memory: dict[tuple[str, str, str], Future[Any]] = {}
+_memory: dict[tuple[str, str, str, str], Future[Any]] = {}
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -60,24 +55,56 @@ def _release_from_payload(value: Sequence[object] | None) -> Release | None:
     return Release(int(value[0]), date.fromisoformat(str(value[1])))
 
 
-def _cache_root(cache_dir: Path, namespace: str, key: str) -> Path:
-    return cache_dir / "_derived" / _CACHE_VERSION / namespace / key
+def _package_version() -> str:
+    return version("cms-icd")
 
 
-def _read_payload(destination: Path, schema: str) -> object | None:
+def _derived_root(cache_dir: Path, package_version: str) -> Path:
+    root = cache_dir / "_derived"
+
+    def is_current() -> bool:
+        try:
+            manifest = json.loads((root / "manifest.json").read_text())
+            return manifest == {"package_version": package_version}
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
+    if is_current():
+        return root
+    with _directory_lock(root):
+        if is_current():
+            return root
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True)
+        (root / "manifest.json").write_text(
+            json.dumps({"package_version": package_version}, indent=2, sort_keys=True)
+            + "\n"
+        )
+    return root
+
+
+def _cache_root(
+    cache_dir: Path,
+    package_version: str,
+    namespace: str,
+    key: str,
+) -> Path:
+    return _derived_root(cache_dir, package_version) / namespace / key
+
+
+def _read_payload(destination: Path) -> object | None:
     try:
         manifest = json.loads((destination / "manifest.json").read_text())
         payload_bytes = (destination / "payload.json").read_bytes()
-        if manifest.get("schema") != schema or hashlib.sha256(
-            payload_bytes
-        ).hexdigest() != manifest.get("payload_sha256"):
+        if hashlib.sha256(payload_bytes).hexdigest() != manifest.get("payload_sha256"):
             return None
         return json.loads(payload_bytes)
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
 
 
-def _write_payload(destination: Path, schema: str, payload: object) -> None:
+def _write_payload(destination: Path, payload: object) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = destination.with_name(destination.name + ".tmp")
     shutil.rmtree(staging, ignore_errors=True)
@@ -90,7 +117,6 @@ def _write_payload(destination: Path, schema: str, payload: object) -> None:
     (staging / "manifest.json").write_text(
         json.dumps(
             {
-                "schema": schema,
                 "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
             },
             indent=2,
@@ -107,13 +133,14 @@ def _load_or_build[T](
     cache_dir: Path,
     namespace: str,
     key: str,
-    schema: str,
     *,
     decode: Callable[[object], T],
     encode: Callable[[T], object],
     build: Callable[[], T],
 ) -> T:
-    memory_key = (str(cache_dir.resolve()), namespace, key)
+    package_version = _package_version()
+    destination = _cache_root(cache_dir, package_version, namespace, key)
+    memory_key = (str(cache_dir.resolve()), package_version, namespace, key)
     with _memory_lock:
         future = _memory.get(memory_key)
         if future is None:
@@ -125,10 +152,8 @@ def _load_or_build[T](
     if not owner:
         return future.result()
 
-    destination = _cache_root(cache_dir, namespace, key)
-
     def decode_cached() -> T | None:
-        payload = _read_payload(destination, schema)
+        payload = _read_payload(destination)
         if payload is None:
             return None
         try:
@@ -147,7 +172,7 @@ def _load_or_build[T](
                     result = cached
                 else:
                     result = build()
-                    _write_payload(destination, schema, encode(result))
+                    _write_payload(destination, encode(result))
         result._cache_fingerprint = key
         future.set_result(result)
         return result
@@ -204,10 +229,10 @@ def _gem_from_payload(payload: object) -> GEMStore:
         raise TypeError("Invalid cached GEM payload")
     grouped: dict[str, list[GEMEntry]] = {}
     for row in payload["rows"]:
-        source = str(row[0]).upper()
+        source = str(row[0])
         entry = GEMEntry(
             source=source,
-            target=None if row[1] is None else str(row[1]).upper(),
+            target=None if row[1] is None else str(row[1]),
             approximate=bool(row[2]),
             no_map=bool(row[3]),
             combination=bool(row[4]),
@@ -217,7 +242,7 @@ def _gem_from_payload(payload: object) -> GEMStore:
         grouped.setdefault(source, []).append(entry)
     provenance: dict[str, GEMProvenance] = {}
     for row in payload.get("provenance") or ():
-        provenance[str(row[0]).upper()] = GEMProvenance(
+        provenance[str(row[0])] = GEMProvenance(
             vocabulary_release=_release_from_payload(row[1]),  # type: ignore[arg-type]
             selected_mapping_release=_release_from_payload(row[2]),  # type: ignore[arg-type]
             reviewed_through_release=_release_from_payload(row[3]),  # type: ignore[arg-type]
@@ -237,7 +262,6 @@ def load_gem_store(
 ) -> GEMStore:
     paths = provider.paths(system, "gems")
     dependencies = {
-        "schema": _GEM_SCHEMA,
         "release": _release_payload(provider.release),
         "system": system,
         "direction": direction.value,
@@ -248,7 +272,6 @@ def load_gem_store(
         provider.cache_dir,
         "gems",
         key,
-        _GEM_SCHEMA,
         decode=_gem_from_payload,
         encode=lambda store: _gem_payload(store, include_provenance=False),
         build=lambda: parse_gems(
@@ -272,7 +295,6 @@ def load_corrected_gem_store(
         return build()
     base = stores[0]
     dependencies = {
-        "schema": _CORRECTED_GEM_SCHEMA,
         "system": base.system,
         "direction": base.direction.value,
         "stores": fingerprints,
@@ -286,7 +308,6 @@ def load_corrected_gem_store(
         cache_dir,
         "corrected-gems",
         key,
-        _CORRECTED_GEM_SCHEMA,
         decode=_gem_from_payload,
         encode=lambda store: _gem_payload(store, include_provenance=True),
         build=build,
@@ -337,7 +358,6 @@ def _tabular_from_payload(payload: object) -> TabularStore:
 def load_tabular_store(provider: CMSProvider, system: str) -> TabularStore:
     path = provider.paths(system, "tabular")[0]
     dependencies = {
-        "schema": _TABULAR_SCHEMA,
         "release": _release_payload(provider.release),
         "system": system,
         "file": [path.name, _sha256(path)],
@@ -348,7 +368,6 @@ def load_tabular_store(provider: CMSProvider, system: str) -> TabularStore:
         provider.cache_dir,
         "tabular",
         key,
-        _TABULAR_SCHEMA,
         decode=_tabular_from_payload,
         encode=_tabular_payload,
         build=lambda: parser(path),
@@ -393,7 +412,6 @@ def _guideline_from_payload(payload: object) -> GuidelineStore:
 def load_guideline_store(provider: CMSProvider, system: str) -> GuidelineStore:
     path = provider.paths(system, "guidelines")[0]
     dependencies = {
-        "schema": _GUIDELINE_SCHEMA,
         "release": _release_payload(provider.release),
         "system": system,
         "file": [path.name, _sha256(path)],
@@ -403,7 +421,6 @@ def load_guideline_store(provider: CMSProvider, system: str) -> GuidelineStore:
         provider.cache_dir,
         "guidelines",
         key,
-        _GUIDELINE_SCHEMA,
         decode=_guideline_from_payload,
         encode=_guideline_payload,
         build=lambda: parse_guidelines(path, system=system),
@@ -430,7 +447,6 @@ def _index_from_payload(payload: object) -> IndexStore:
 def load_index_store(provider: CMSProvider, system: str) -> IndexStore:
     paths = provider.paths(system, "index")
     dependencies = {
-        "schema": _INDEX_SCHEMA,
         "release": _release_payload(provider.release),
         "system": system,
         "files": _path_fingerprints(paths),
@@ -440,14 +456,13 @@ def load_index_store(provider: CMSProvider, system: str) -> IndexStore:
         provider.cache_dir,
         "index",
         key,
-        _INDEX_SCHEMA,
         decode=_index_from_payload,
         encode=_index_payload,
         build=lambda: parse_index(paths, system=system),
     )
 
 
-def clear_memory_cache() -> None:
+def _clear_memory_cache() -> None:
     """Clear process-local parsed-store cache entries.
 
     Parsed stores are retained per cache directory for the lifetime of the process. Call

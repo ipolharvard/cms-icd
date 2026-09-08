@@ -20,15 +20,8 @@ clear_memory_caches(MemoryCache.PARSED, "resolution")
 ```
 
 The function only releases in-memory state. Persistent catalog, artifact, and
-derived cache files are left untouched. The existing subsystem-specific clear
-functions remain available for backward compatibility.
+derived cache files are left untouched.
 
 ::: cms_icd.memory_cache.MemoryCache
 
 ::: cms_icd.memory_cache.clear_memory_caches
-
-::: cms_icd.sources.clear_catalog_memory_cache
-
-::: cms_icd.parsed_cache.clear_memory_cache
-
-::: cms_icd.resolution.clear_resolution_memory_cache

@@ -618,7 +618,7 @@ def resolve_icd9_to_icd10_pcs_mapping(
     )[fiscal_year]
 
 
-def clear_resolution_memory_cache() -> None:
+def _clear_resolution_memory_cache() -> None:
     """Clear process-local resolution state for tests and diagnostics."""
     with _resolution_lock:
         _resolution_cache.clear()

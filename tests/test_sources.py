@@ -15,7 +15,7 @@ from zipfile import ZipFile
 import pytest
 import requests
 
-from cms_icd import ICD10KnowledgeBase, clear_catalog_memory_cache
+from cms_icd import ICD10KnowledgeBase, MemoryCache, clear_memory_caches
 from cms_icd.exceptions import (
     AmbiguousReleaseError,
     DownloadError,
@@ -864,7 +864,7 @@ def test_from_cms_and_for_date_reject_unknown_fallback() -> None:
 
 def test_distinct_catalog_cache_directories_are_evictable(tmp_path: Path) -> None:
     release = Release(2026, date(2025, 10, 1))
-    clear_catalog_memory_cache()
+    clear_memory_caches(MemoryCache.CATALOG)
     assert len(_catalog_cache) == 0
 
     providers = []
@@ -897,7 +897,7 @@ def test_distinct_catalog_cache_directories_are_evictable(tmp_path: Path) -> Non
     warm = CMSProvider(release, cache_dir=providers[0].cache_dir, offline=True)
     assert warm._load_catalog()
 
-    clear_catalog_memory_cache()
+    clear_memory_caches(MemoryCache.CATALOG)
     assert len(_catalog_cache) == 0
 
     reloaded = CMSProvider(release, cache_dir=providers[1].cache_dir, offline=True)

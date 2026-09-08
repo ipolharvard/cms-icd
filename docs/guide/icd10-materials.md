@@ -17,7 +17,7 @@ icd = ICD10KnowledgeBase.for_date(date(2026, 5, 1))
 cm = icd.cm
 
 diagnosis = cm["I10"]
-parents = cm.get_all_tabular_parents("I10")
+parents = cm.tabular.parents("I10")
 ```
 
 Use the underlying [tabular store](../reference/stores.md#cms_icd.stores.TabularStore)

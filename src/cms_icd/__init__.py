@@ -37,14 +37,13 @@ from .models import (
     Release,
     Term,
 )
-from .parsed_cache import clear_memory_cache
 from .resolution import (
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
     resolve_icd9_to_icd10_pcs_mappings,
 )
-from .sources import clear_catalog_memory_cache, refresh_cms_catalog
+from .sources import refresh_cms_catalog
 from .stores import GEMStore
 
 __all__ = [
@@ -77,8 +76,6 @@ __all__ = [
     "Release",
     "ReleaseUnavailableError",
     "Term",
-    "clear_catalog_memory_cache",
-    "clear_memory_cache",
     "clear_memory_caches",
     "refresh_cms_catalog",
     "resolve_icd9_to_icd10_cm_mapping",

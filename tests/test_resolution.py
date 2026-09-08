@@ -23,11 +23,11 @@ from cms_icd import (
 from cms_icd.models import Code, GEMDirection, Node, Release
 from cms_icd.parsers import parse_gems
 from cms_icd.resolution import (
+    _clear_resolution_memory_cache,
     _discover_years,
     _resolution_cache,
     _resolve_cm_mapping,
     _resolve_pcs_mapping,
-    clear_resolution_memory_cache,
 )
 from cms_icd.sources import CatalogEntry
 from cms_icd.stores import TabularStore
@@ -683,7 +683,7 @@ def test_fingerprintless_store_keys_are_stable_under_object_lifetime(
     monkeypatch.setattr(
         "cms_icd.resolution.ICD10KnowledgeBase.from_cms", lambda **_: knowledge
     )
-    clear_resolution_memory_cache()
+    _clear_resolution_memory_cache()
 
     holder[2017] = GEMStore(
         {"0020": (_entry("0020", "A70"),)},
@@ -770,7 +770,7 @@ def test_single_year_pcs_wrapper_uses_bulk_loader(
     assert resolve_icd9_to_icd10_pcs_mapping(fiscal_year=2018) is expected
 
 
-def test_clear_resolution_memory_cache_empties_populated_cache(
+def test_unified_clear_empties_populated_resolution_cache(
     monkeypatch: pytest.MonkeyPatch, tabular: TabularStore
 ) -> None:
     release = Release(2018, date(2017, 10, 1))

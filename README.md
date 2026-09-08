@@ -49,6 +49,13 @@ Use `icd.cm` for diagnoses and `icd.pcs` for inpatient procedures. See
 [Work with ICD-10 materials](https://ipolharvard.github.io/cms-icd/guide/icd10-materials/)
 for hierarchy navigation, index lookup, instructional notes, and guidelines.
 
+Official coding guidelines are available by their familiar section numbers:
+
+```pycon
+>>> icd.cm.guidelines["I.A.1"].title
+'The Alphabetic Index and Tabular List'
+```
+
 ## Compare exact releases
 
 Use `from_cms()` to compare the same code across CMS fiscal years:

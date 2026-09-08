@@ -1,24 +1,27 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import date
+from importlib.metadata import version
 from threading import Event, Thread
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
-from cms_icd import GEMDirection, GEMEntry, GEMStore, clear_memory_cache
+from cms_icd import GEMDirection, GEMEntry, GEMStore
 from cms_icd.gems import _backport_corrections
 from cms_icd.knowledge_base import ICD10KnowledgeBase
 from cms_icd.models import Code, Guideline, Node, Release, Term
 from cms_icd.parsed_cache import (
-    _gem_from_payload,
+    _clear_memory_cache,
     _memory,
     load_corrected_gem_store,
     load_gem_store,
     load_tabular_store,
 )
+from cms_icd.parsers import parse_gems
 from cms_icd.sources import CMSProvider
 from cms_icd.stores import GuidelineStore, IndexStore, TabularStore
 
@@ -42,7 +45,7 @@ def test_raw_gem_store_is_loaded_from_persistent_parsed_cache(
     provider = _provider(tmp_path / "cache", (gem_path,))
 
     first = load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
-    clear_memory_cache()
+    _clear_memory_cache()
     monkeypatch.setattr(
         "cms_icd.parsed_cache.parse_gems",
         lambda *_args, **_kwargs: pytest.fail("warm cache invoked GEM parser"),
@@ -51,22 +54,62 @@ def test_raw_gem_store_is_loaded_from_persistent_parsed_cache(
     second = load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
 
     assert second["0010"] == first["0010"]
-    assert list((provider.cache_dir / "_derived" / "v1" / "gems").iterdir())
+    assert list((provider.cache_dir / "_derived" / "gems").iterdir())
 
 
-def test_legacy_gem_cache_payload_is_normalized_to_canonical_case() -> None:
-    store = _gem_from_payload(
-        {
-            "system": "cm",
-            "direction": "icd9_to_icd10",
-            "release": None,
-            "rows": [["e123", "r311", False, False, False, 0, 0]],
-            "provenance": [],
-        }
+def test_unrecognized_derived_cache_is_deleted_without_touching_sources(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "cache"
+    obsolete = cache_dir / "_derived" / "gems" / "obsolete"
+    obsolete.mkdir(parents=True)
+    (obsolete / "payload.json").write_text("obsolete", encoding="utf-8")
+    artifact = cache_dir / "fy2018" / "2017-10-01" / "cm" / "gems" / "2018_I9gem.txt"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("0010 A000 10000\n", encoding="ascii")
+
+    store = load_gem_store(
+        _provider(cache_dir, (artifact,)),
+        "cm",
+        GEMDirection.ICD9_TO_ICD10,
     )
 
-    assert store["E123"][0].source == "E123"
-    assert store["E123"][0].target == "R311"
+    assert store["0010"][0].target == "A000"
+    assert artifact.exists()
+    assert not obsolete.exists()
+    assert json.loads((cache_dir / "_derived" / "manifest.json").read_text()) == {
+        "package_version": version("cms-icd")
+    }
+
+
+def test_package_version_change_rebuilds_all_derived_stores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gem_path = tmp_path / "2018_I9gem.txt"
+    gem_path.write_text("0010 A000 10000\n", encoding="ascii")
+    provider = _provider(tmp_path / "cache", (gem_path,))
+    builds = 0
+
+    def counting_parser(*args, **kwargs):
+        nonlocal builds
+        builds += 1
+        return parse_gems(*args, **kwargs)
+
+    monkeypatch.setattr("cms_icd.parsed_cache.parse_gems", counting_parser)
+    monkeypatch.setattr("cms_icd.parsed_cache._package_version", lambda: "0.2.0")
+    load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
+    obsolete = provider.cache_dir / "_derived" / "index" / "obsolete"
+    obsolete.mkdir(parents=True)
+    _clear_memory_cache()
+    monkeypatch.setattr("cms_icd.parsed_cache._package_version", lambda: "0.3.0")
+    load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
+
+    assert builds == 2
+    assert not obsolete.exists()
+    assert json.loads(
+        (provider.cache_dir / "_derived" / "manifest.json").read_text()
+    ) == {"package_version": "0.3.0"}
 
 
 def test_parsed_cache_corruption_and_source_change_rebuild(
@@ -76,19 +119,19 @@ def test_parsed_cache_corruption_and_source_change_rebuild(
     gem_path.write_text("0010 A000 10000\n", encoding="ascii")
     provider = _provider(tmp_path / "cache", (gem_path,))
     first = load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
-    cache_entries = list((provider.cache_dir / "_derived" / "v1" / "gems").iterdir())
+    cache_entries = list((provider.cache_dir / "_derived" / "gems").iterdir())
     (cache_entries[0] / "payload.json").write_text("corrupt")
-    clear_memory_cache()
+    _clear_memory_cache()
 
     rebuilt = load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
     assert rebuilt["0010"] == first["0010"]
 
     gem_path.write_text("0010 A001 10000\n", encoding="ascii")
-    clear_memory_cache()
+    _clear_memory_cache()
     changed = load_gem_store(provider, "cm", GEMDirection.ICD9_TO_ICD10)
 
     assert changed["0010"][0].target == "A001"
-    assert len(list((provider.cache_dir / "_derived" / "v1" / "gems").iterdir())) == 2
+    assert len(list((provider.cache_dir / "_derived" / "gems").iterdir())) == 2
 
 
 def test_tabular_store_is_loaded_from_persistent_parsed_cache(
@@ -108,7 +151,7 @@ def test_tabular_store_is_loaded_from_persistent_parsed_cache(
     monkeypatch.setattr("cms_icd.parsed_cache.parse_cm_tabular", lambda _path: expected)
 
     first = load_tabular_store(provider, "cm")
-    clear_memory_cache()
+    _clear_memory_cache()
     monkeypatch.setattr(
         "cms_icd.parsed_cache.parse_cm_tabular",
         lambda _path: pytest.fail("warm cache invoked XML parser"),
@@ -196,11 +239,11 @@ def test_guideline_and_index_views_share_persistent_parsed_cache(
     first = make_knowledge_base()
     first.cm.load_all()
     assert counts == {"tabular": 1, "index": 1, "guidelines": 1}
-    derived = tmp_path / "cache" / "_derived" / "v1"
+    derived = tmp_path / "cache" / "_derived"
     assert list((derived / "tabular").iterdir())
     assert list((derived / "index").iterdir())
     assert list((derived / "guidelines").iterdir())
-    clear_memory_cache()
+    _clear_memory_cache()
 
     second = make_knowledge_base()
     second.cm.load_all()
@@ -234,7 +277,7 @@ def test_corrected_store_cache_preserves_provenance(tmp_path: Path) -> None:
         universes,
         build=lambda: _backport_corrections(stores, universes),
     )
-    clear_memory_cache()
+    _clear_memory_cache()
     second = load_corrected_gem_store(
         tmp_path,
         stores,
@@ -249,7 +292,7 @@ def test_corrected_store_cache_preserves_provenance(tmp_path: Path) -> None:
 def test_distinct_cache_directories_are_evictable_and_warm_reuse_works(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    clear_memory_cache()
+    _clear_memory_cache()
     assert len(_memory) == 0
 
     providers = []
@@ -263,7 +306,7 @@ def test_distinct_cache_directories_are_evictable_and_warm_reuse_works(
 
     assert len(_memory) == 3
 
-    for entry in (providers[0].cache_dir / "_derived" / "v1" / "gems").iterdir():
+    for entry in (providers[0].cache_dir / "_derived" / "gems").iterdir():
         (entry / "payload.json").write_text("corrupt", encoding="utf-8")
     monkeypatch.setattr(
         "cms_icd.parsed_cache.parse_gems",
@@ -273,7 +316,7 @@ def test_distinct_cache_directories_are_evictable_and_warm_reuse_works(
     again = load_gem_store(providers[0], "cm", GEMDirection.ICD9_TO_ICD10)
     assert again is stores[0]
 
-    clear_memory_cache()
+    _clear_memory_cache()
     assert len(_memory) == 0
 
     reloaded = load_gem_store(providers[1], "cm", GEMDirection.ICD9_TO_ICD10)
@@ -315,12 +358,12 @@ def test_failed_build_does_not_remove_replacement_after_clear(
         except BaseException as error:
             errors.append(error)
 
-    clear_memory_cache()
+    _clear_memory_cache()
     first = Thread(target=load)
     first.start()
     assert first_build_started.wait(10)
 
-    clear_memory_cache()
+    _clear_memory_cache()
     second = Thread(target=load)
     second.start()
     deadline = time.monotonic() + 10

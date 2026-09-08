@@ -1,8 +1,7 @@
 """Immutable public records used by :mod:`cms_icd`.
 
 The records use slotted dataclasses because a complete ICD release contains many
-thousands of code and index objects. They intentionally retain a small ``model_dump``
-compatibility method for consumers migrating from Pydantic models.
+thousands of code and index objects.
 """
 
 from __future__ import annotations
@@ -39,10 +38,6 @@ class Record:
         if exclude_none:
             return {key: value for key, value in result.items() if value is not None}
         return result
-
-    def model_dump(self, *, exclude_none: bool = False, **_: Any) -> dict[str, Any]:
-        """Compatibility alias for Pydantic's ``model_dump`` method."""
-        return self.to_dict(exclude_none=exclude_none)
 
 
 @dataclass(frozen=True, slots=True)

@@ -57,7 +57,7 @@ Knowledge-base convenience methods return common relationship queries:
 >>> cm = ICD10CMKnowledgeBase.from_stores(tabular=tabular)
 >>> cm["I10"].description
 'Essential hypertension'
->>> [node.id for node in cm.get_all_tabular_parents("I10")]
+>>> [node.id for node in cm.tabular.parents("I10")]
 ['cm']
 >>> cm.get_leaves("cm")
 ['I10']
