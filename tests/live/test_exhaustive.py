@@ -78,7 +78,6 @@ def test_every_advertised_snapshot_and_material_parses(
     for year, dates in selected_releases.items():
         for effective in dates:
             kb = ICD10KnowledgeBase.from_cms(
-                fiscal_year=year,
                 release_date=effective,
                 cache_dir=historical_cache,
             )

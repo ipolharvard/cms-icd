@@ -48,14 +48,23 @@ dataset, model, or audit:
 
 ```python
 icd = ICD10KnowledgeBase.from_cms(
-    fiscal_year=2026,
     release_date=date(2026, 4, 1),
 )
 ```
 
-If `release_date` is omitted, October 1 before the fiscal year is used. The
-requested date must be an effective revision advertised by CMS; an arbitrary
-date such as February 1 is not accepted as an exact snapshot.
+Pass exactly one selector to `from_cms()`:
+
+- `fiscal_year=2026` selects the initial revision effective October 1, 2025.
+- `release_date=date(2026, 4, 1)` selects that effective revision and infers
+  FY2026.
+
+The requested release date must be an effective revision advertised by CMS;
+an arbitrary date such as February 1 is not accepted as an exact snapshot.
+`release_date` is the revision's effective date, not its publication, correction,
+or download date.
+
+Calls using the former `year=` alias or passing both selectors must migrate to
+one of the forms above.
 
 ## How midyear updates work
 
@@ -135,7 +144,6 @@ fiscal year:
 
 ```python
 icd = ICD10KnowledgeBase.from_cms(
-    fiscal_year=2026,
     release_date=date(2026, 4, 1),
     fallback="latest_for_fy",
 )

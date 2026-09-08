@@ -42,7 +42,6 @@ def test_latest_complete_snapshot_fresh_download_parses_all_materials(
 ) -> None:
     release = latest_complete_release(catalog_entries())
     kb = ICD10KnowledgeBase.from_cms(
-        fiscal_year=release.fiscal_year,
         release_date=release.release_date,
         cache_dir=fresh_cache,
     )

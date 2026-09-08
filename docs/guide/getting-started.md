@@ -21,7 +21,6 @@ For a reproducible dataset or experiment, pin the exact effective snapshot:
 
 ```python
 icd = ICD10KnowledgeBase.from_cms(
-    fiscal_year=2026,
     release_date=date(2026, 4, 1),
 )
 ```

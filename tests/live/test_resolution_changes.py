@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,7 +34,6 @@ def test_official_cm_resolutions_only_return_code_nodes(
     for year in years:
         tabular = ICD10KnowledgeBase.from_cms(
             fiscal_year=year,
-            release_date=date(year - 1, 10, 1),
             cache_dir=historical_cache,
         ).cm.tabular
         for resolution in resolved[year].values():

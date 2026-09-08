@@ -855,7 +855,6 @@ def test_from_cms_and_for_date_reject_unknown_fallback() -> None:
     for value in ("latest-fy", "latest_fy"):
         with pytest.raises(ValueError, match="fallback"):
             ICD10KnowledgeBase.from_cms(
-                fiscal_year=2026,
                 release_date=date(2026, 2, 1),
                 fallback=value,
             )

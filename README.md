@@ -15,15 +15,16 @@ Mappings (GEMs).
 Choose data by service date or by an exact CMS release. Files are downloaded
 from CMS only when needed and cached for later use.
 
+## At a glance
+
+- Look up ICD-10-CM and ICD-10-PCS codes for the date that controls coding.
+- Compare code definitions across CMS fiscal years and midyear revisions.
+- Navigate hierarchies and indexes, inspect instructional notes, and read
+  coding guidelines.
+- Resolve ICD-9-CM mappings by discharge date and use later CMS corrections
+  without changing the historical code vocabulary.
+
 ## Install
-
-With `uv`:
-
-```bash
-uv add cms-icd
-```
-
-Or with `pip`:
 
 ```bash
 pip install cms-icd
@@ -33,129 +34,96 @@ pip install cms-icd
 
 Use the date that controls coding for the encounter:
 
-```python
-from datetime import date
-
-from cms_icd import ICD10KnowledgeBase
-
-icd = ICD10KnowledgeBase.for_date(date(2026, 5, 1))
-
-diagnosis = icd.cm["I10"]
-print(diagnosis.description)
+```pycon
+>>> from datetime import date
+>>> from cms_icd import ICD10KnowledgeBase
+>>> icd = ICD10KnowledgeBase.for_date(date(2026, 5, 1))
+>>> icd.cm["I10"].description
+'Essential (primary) hypertension'
 ```
 
 Use the discharge date for inpatient ICD-10-CM and ICD-10-PCS. For other
 ICD-10-CM use cases, use the encounter or service date.
 
-The knowledge base provides separate views for:
+Use `icd.cm` for diagnoses and `icd.pcs` for inpatient procedures. See
+[Work with ICD-10 materials](https://ipolharvard.github.io/cms-icd/guide/icd10-materials/)
+for hierarchy navigation, index lookup, instructional notes, and guidelines.
 
-- `icd.cm`: ICD-10-CM codes, hierarchy, index, and guidelines;
-- `icd.pcs`: ICD-10-PCS codes, hierarchy, index, and guidelines.
+## Compare exact releases
 
-See [Work with ICD-10 materials](https://ipolharvard.github.io/cms-icd/guide/icd10-materials/)
-for code navigation, index lookup, instructional notes, and guideline access.
+Use `from_cms()` to compare the same code across CMS fiscal years:
 
-## Choose an exact release
-
-Use `from_cms()` when you need a specific CMS fiscal-year revision:
-
-```python
-from datetime import date
-
-from cms_icd import ICD10KnowledgeBase
-
-icd = ICD10KnowledgeBase.from_cms(
-    fiscal_year=2026,
-    release_date=date(2026, 4, 1),
-)
+```pycon
+>>> from cms_icd import ICD10KnowledgeBase
+>>> for year in (2024, 2025):
+...     icd = ICD10KnowledgeBase.from_cms(fiscal_year=year)
+...     print(year, icd.cm["K58.9"].description)
+2024 Irritable bowel syndrome without diarrhea
+2025 Irritable bowel syndrome, unspecified
 ```
 
-CMS commonly starts a fiscal year with an October release and may publish an
-April update. If a material did not change in the update, `cms-icd` uses the
-most recent earlier material from the same fiscal year.
+CMS may also publish an April update within a fiscal year. If a material did
+not change in the update, `cms-icd` uses the most recent earlier material from
+the same fiscal year.
 
-Release selection is strict by default. The
+The
 [release guide](https://ipolharvard.github.io/cms-icd/guide/releases/)
-explains available years, midyear updates, and explicit fallback behavior.
+explains fiscal years, midyear updates, exact snapshots, and fallback behavior.
 
-## Use General Equivalence Mappings
+## Map ICD-9-CM by discharge date
 
-Access the official GEM rows and flags without losing alternatives or
-combination mappings:
+The applicable mapping can depend on the discharge date:
 
-```python
-from cms_icd import GEMKnowledgeBase
-
-gems = GEMKnowledgeBase.from_cms(fiscal_year=2018)
-entries = gems.cm.icd9_to_icd10["4280"]
-mapping = gems.cm.icd9_to_icd10.mapping("4280")
+```pycon
+>>> from datetime import date
+>>> from cms_icd import resolve_icd9_to_icd10_cm_mappings
+>>> from cms_icd.sources import fiscal_year_for
+>>> discharge_dates = (date(2016, 9, 30), date(2016, 10, 1))
+>>> years = [fiscal_year_for(value) for value in discharge_dates]
+>>> by_year = resolve_icd9_to_icd10_cm_mappings(years)
+>>> for discharge_date, year in zip(discharge_dates, years, strict=True):
+...     print(discharge_date, by_year[year]["29682"].target_codes)
+2016-09-30 ('F328',)
+2016-10-01 ('F3289',)
 ```
 
-Diagnosis mappings are available through `gems.cm`, and procedure mappings
-through `gems.pcs`. Each provides both ICD-9-to-ICD-10 and ICD-10-to-ICD-9
-directions.
+## Use the best corrected GEM history
 
-For historical GEMs with later CMS corrections, use:
+Later CMS releases corrected some earlier GEM rows. Compare the original FY2016
+mapping with the best corrected history:
 
-```python
-gems = GEMKnowledgeBase.corrected_from_cms(fiscal_year=2016)
+```pycon
+>>> from cms_icd import GEMKnowledgeBase
+>>> code = "27906"
+>>> original = GEMKnowledgeBase.from_cms(fiscal_year=2016).cm.icd9_to_icd10
+>>> corrected = GEMKnowledgeBase.corrected_from_cms(
+...     fiscal_year=2016,
+... ).cm.icd9_to_icd10
+>>> tuple(entry.target for entry in original[code])
+('D838', 'D839')
+>>> tuple(entry.target for entry in corrected[code])
+('D831',)
+>>> corrected.provenance(code).selected_mapping_release.fiscal_year
+2017
 ```
 
-These knowledge-base interfaces return the official mapping structure and do
-not choose a preferred target for you. For bulk best-effort interpretation,
-load every compatible diagnosis year at once:
-
-```python
-from cms_icd import resolve_icd9_to_icd10_cm_mappings
-
-by_year = resolve_icd9_to_icd10_cm_mappings()
-targets = by_year[2016]["4280"].target_codes
-```
-
-Use `resolve_icd9_to_icd10_pcs_mappings()` for procedures; its results expose
-`target_patterns`. Pass an explicit `fiscal_years` iterable for a pinned
-research cohort. An omitted value discovers every compatible GEM year through
-the FY2018 correction horizon, currently FY2014--FY2018.
-
-Resolution is best effort rather than an authoritative one-to-one conversion.
-It preserves required combinations, may collapse diagnosis alternatives to a
-common hierarchy ancestor, and may mask disagreeing PCS axes with `?`. See the
+The corrected mapping retains the FY2016 target vocabulary while using the
+complete corrected row set published for FY2017. GEM resolution is best effort,
+not an authoritative one-to-one conversion. The
 [GEM guide](https://ipolharvard.github.io/cms-icd/guide/general-equivalence-mappings/)
-for alternatives, combinations, flags, and correction history.
+explains diagnosis and procedure mappings, alternatives, combinations, flags,
+resolution policy, and correction history.
 
-## Configure caching and offline access
+## Documentation
 
-By default, downloaded CMS files are stored in the platform cache directory.
-Provide `cache_dir` to use a project, scratch, or shared location:
-
-```python
-from datetime import date
-from pathlib import Path
-
-from cms_icd import ICD10KnowledgeBase
-
-icd = ICD10KnowledgeBase.for_date(
-    date(2026, 5, 1),
-    cache_dir=Path("/shared/cache/cms_icd"),
-)
-```
-
-After the selected files have been cached, set `offline=True` to prevent
-network access:
-
-```python
-icd = ICD10KnowledgeBase.for_date(
-    date(2026, 5, 1),
-    cache_dir="/shared/cache/cms_icd",
-    offline=True,
-)
-```
-
-Use `ICD10KnowledgeBase.from_directory()` or
-`GEMKnowledgeBase.from_directory()` when you already manage the original CMS
-files yourself. See the
-[caching guide](https://ipolharvard.github.io/cms-icd/guide/caching/) for
-ephemeral caches, memory-cache management, catalog refresh, and cache integrity.
+- [Getting started](https://ipolharvard.github.io/cms-icd/guide/getting-started/)
+- [Release selection](https://ipolharvard.github.io/cms-icd/guide/releases/)
+- [ICD-10 materials](https://ipolharvard.github.io/cms-icd/guide/icd10-materials/)
+- [General Equivalence Mappings](https://ipolharvard.github.io/cms-icd/guide/general-equivalence-mappings/)
+- [Caching and offline use](https://ipolharvard.github.io/cms-icd/guide/caching/)
+- [API reference](https://ipolharvard.github.io/cms-icd/reference/knowledge-base/)
+- [Development](https://ipolharvard.github.io/cms-icd/development/) and
+  [testing](https://ipolharvard.github.io/cms-icd/testing/)
 
 ## Citation and acknowledgment
 
@@ -164,26 +132,13 @@ using
 [`CITATION.cff`](https://github.com/ipolharvard/cms-icd/blob/main/CITATION.cff)
 and acknowledge IPOL at MGH.
 
-The version-independent project DOI is
+The project DOI is
 [`10.5281/zenodo.21952934`](https://doi.org/10.5281/zenodo.21952934).
 
 The source code is licensed under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). See
 [`NOTICE`](https://github.com/ipolharvard/cms-icd/blob/main/NOTICE) for
 attribution information.
-
-## Development
-
-```bash
-make install-dev
-make test
-make install-docs
-make docs
-```
-
-See the [development guide](https://ipolharvard.github.io/cms-icd/development/)
-and [testing guide](https://ipolharvard.github.io/cms-icd/testing/) for the
-available checks and CMS integration tests.
 
 `cms-icd` is an independent open-source project. It is not affiliated with,
 endorsed by, or sponsored by the Centers for Medicare & Medicaid Services.

@@ -548,7 +548,6 @@ def resolve_icd9_to_icd10_cm_mappings(
         ).cm.icd9_to_icd10
         tabular = ICD10KnowledgeBase.from_cms(
             fiscal_year=year,
-            release_date=date(year - 1, 10, 1),
             cache_dir=cache_dir,
             offline=offline,
         ).cm.tabular

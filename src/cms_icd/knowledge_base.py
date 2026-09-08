@@ -387,34 +387,36 @@ class ICD10KnowledgeBase:
         cls,
         fiscal_year: int | None = None,
         *,
-        year: int | None = None,
         release_date: date | None = None,
         cache_dir: str | Path | None = None,
         fallback: str | None = None,
         offline: bool = False,
     ) -> Self:
-        """Create a lazy selector for an exact CMS fiscal-year snapshot.
+        """Create a lazy selector for an exact CMS snapshot.
 
-        ``year`` is accepted as a compatibility alias for ``fiscal_year``.
+        Provide exactly one of ``fiscal_year`` or ``release_date``. A fiscal
+        year selects its initial October 1 revision. A release date selects
+        that effective revision and its fiscal year is inferred.
         Materials unchanged in the requested revision are inherited from the
         latest earlier revision in the same fiscal year.
 
         Args:
             fiscal_year: CMS fiscal year.
-            year: Compatibility alias for ``fiscal_year``.
-            release_date: Effective date of the requested revision. Defaults to
-                October 1 preceding the fiscal year.
+            release_date: Effective date of the requested revision.
             cache_dir: Persistent artifact cache directory. ``None`` uses the
                 platform default cache directory.
             fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
             offline: Require the catalog and artifacts to already be cached.
         """
-        selected_year = fiscal_year if fiscal_year is not None else year
-        if selected_year is None:
-            raise TypeError("fiscal_year is required")
-        if fiscal_year is not None and year is not None and fiscal_year != year:
-            raise ValueError("fiscal_year and year disagree")
-        selected_date = release_date or date(selected_year - 1, 10, 1)
+        if (fiscal_year is None) == (release_date is None):
+            raise TypeError("provide exactly one of fiscal_year or release_date")
+        if release_date is not None:
+            selected_year = fiscal_year_for(release_date)
+            selected_date = release_date
+        else:
+            assert fiscal_year is not None
+            selected_year = fiscal_year
+            selected_date = date(fiscal_year - 1, 10, 1)
         release = Release(selected_year, selected_date)
         return cls(
             CMSProvider(

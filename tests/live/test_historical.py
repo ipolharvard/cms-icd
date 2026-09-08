@@ -62,7 +62,6 @@ def test_archived_fy2017_cm_and_pcs_tabular_materials_parse(
 ) -> None:
     kb = ICD10KnowledgeBase.from_cms(
         fiscal_year=2017,
-        release_date=date(2016, 10, 1),
         cache_dir=historical_cache,
     )
 
@@ -85,7 +84,6 @@ def test_fy2019_direct_and_zipped_guidelines_parse(
 ) -> None:
     kb = ICD10KnowledgeBase.from_cms(
         fiscal_year=2019,
-        release_date=date(2018, 10, 1),
         cache_dir=historical_cache,
     )
 
@@ -108,7 +106,6 @@ def test_fy2022_updated_names_and_four_part_cm_index_parse(
 ) -> None:
     kb = ICD10KnowledgeBase.from_cms(
         fiscal_year=2022,
-        release_date=date(2021, 10, 1),
         cache_dir=historical_cache,
     )
 
@@ -134,11 +131,9 @@ def test_fy2025_initial_and_april_revisions_parse_distinct_pcs_codes(
 ) -> None:
     initial = ICD10KnowledgeBase.from_cms(
         fiscal_year=2025,
-        release_date=date(2024, 10, 1),
         cache_dir=historical_cache,
     )
     april = ICD10KnowledgeBase.from_cms(
-        fiscal_year=2025,
         release_date=date(2025, 4, 1),
         cache_dir=historical_cache,
     )
@@ -193,7 +188,6 @@ def test_april_snapshot_inherits_and_replaces_materials_per_system(
     historical_cache: Path,
 ) -> None:
     april = ICD10KnowledgeBase.from_cms(
-        fiscal_year=2026,
         release_date=date(2026, 4, 1),
         cache_dir=historical_cache,
     )

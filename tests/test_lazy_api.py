@@ -36,6 +36,44 @@ def test_repr_and_view_access_do_not_acquire_material() -> None:
     assert provider.calls == []
 
 
+def test_from_cms_selects_initial_revision_from_fiscal_year() -> None:
+    kb = ICD10KnowledgeBase.from_cms(fiscal_year=2026)
+
+    assert kb.release == Release(2026, date(2025, 10, 1))
+
+
+@pytest.mark.parametrize(
+    ("release_date", "fiscal_year"),
+    [
+        (date(2025, 9, 30), 2025),
+        (date(2025, 10, 1), 2026),
+        (date(2026, 4, 1), 2026),
+    ],
+)
+def test_from_cms_infers_fiscal_year_from_release_date(
+    release_date: date,
+    fiscal_year: int,
+) -> None:
+    kb = ICD10KnowledgeBase.from_cms(release_date=release_date)
+
+    assert kb.release == Release(fiscal_year, release_date)
+
+
+def test_from_cms_requires_exactly_one_selector() -> None:
+    with pytest.raises(TypeError, match="exactly one"):
+        ICD10KnowledgeBase.from_cms()
+    with pytest.raises(TypeError, match="exactly one"):
+        ICD10KnowledgeBase.from_cms(
+            fiscal_year=2026,
+            release_date=date(2026, 4, 1),
+        )
+
+
+def test_from_cms_rejects_removed_year_alias() -> None:
+    with pytest.raises(TypeError, match="unexpected keyword argument 'year'"):
+        ICD10KnowledgeBase.from_cms(year=2026)  # type: ignore[call-arg]
+
+
 def test_tabular_access_loads_only_requested_system_and_material(
     tmp_path: Path,
 ) -> None:
