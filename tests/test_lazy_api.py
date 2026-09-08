@@ -9,14 +9,12 @@ import pytest
 
 from cms_icd import knowledge_base
 from cms_icd.knowledge_base import ICD10CMKnowledgeBase, ICD10KnowledgeBase
-from cms_icd.models import Guideline, Release
+from cms_icd.models import Code, Guideline, Node, Release, Term
 from cms_icd.sources import MaterialProvider
-from cms_icd.stores import GuidelineStore
+from cms_icd.stores import GuidelineStore, IndexStore, TabularStore
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from cms_icd.stores import TabularStore
 
 
 class RecordingProvider(MaterialProvider):
@@ -154,3 +152,60 @@ def test_cm_and_pcs_view_creation_is_race_free(
     assert pcs_views[0] is pcs_views[1]
     assert len(cm_loads) == 1
     assert len(pcs_loads) == 1
+
+
+def test_membership_and_term_codes_agree_with_by_code_dot_tolerance() -> None:
+    root = Node("cm", "cm", children_ids=("I20",))
+    i20 = Code(
+        "I20",
+        "I20",
+        parent_id="cm",
+        assignable=False,
+        children_ids=("I20.9", "I20.1"),
+    )
+    i20_9 = Code("I20.9", "I20.9", "Hypertension, unspecified", parent_id="I20")
+    i20_1 = Code(
+        "I20.1",
+        "I20.1",
+        "Hypertensive heart disease with heart failure",
+        parent_id="I20",
+        assignable=False,
+        children_ids=("I20.10",),
+    )
+    i20_10 = Code("I20.10", "I20.10", "Acute left heart failure", parent_id="I20.1")
+    nodes = (root, i20, i20_9, i20_1, i20_10)
+    tabular = TabularStore(
+        {node.id: node for node in nodes},
+        {node.name: node.id for node in nodes if isinstance(node, Code)},
+        ("cm",),
+    )
+    index = IndexStore(
+        {
+            "compact": Term("compact", "Hypertension, unspecified", code="I209"),
+            "dotted": Term("dotted", "Hypertension, unspecified", code="I20.9"),
+            "trailing": Term("trailing", "Hypertension, unspecified", code="I20.9."),
+            "compact_category": Term("compact_category", "Heart failure", code="I201"),
+            "raw_category": Term("raw_category", "Hypertension", code="I20"),
+            "dangling": Term("dangling", "Unknown", code="X999"),
+        }
+    )
+    kb = ICD10CMKnowledgeBase.from_stores(tabular=tabular, index=index)
+
+    # by_code resolves dotted, compact, and trailing-dot forms to one Code.
+    assert kb["I20.9"] is kb["I209"]
+    assert kb["I20.9"] is kb["I20.9."]
+
+    # Membership agrees with item access for every dot form.
+    for member in ("I20", "I20.1", "I20.10", "I20.9", "I209", "I201", "I20.9."):
+        assert member in kb
+    for non_member in ("cm", "I2090", "X999"):
+        assert non_member not in kb
+    assert 209 not in kb
+
+    # get_term_codes accepts the same forms and skips unresolvable values.
+    assert kb.get_term_codes("compact") == ["I20.9"]
+    assert kb.get_term_codes("dotted") == ["I20.9"]
+    assert kb.get_term_codes("trailing") == ["I20.9"]
+    assert kb.get_term_codes("compact_category") == ["I20.10"]
+    assert kb.get_term_codes("raw_category") == ["I20.10", "I20.9"]
+    assert kb.get_term_codes("dangling") == []
