@@ -141,6 +141,12 @@ icd = ICD10KnowledgeBase.from_cms(
 )
 ```
 
+For `for_date()`, a fallback is bounded by the coding date: it never selects
+material effective after the `service_date`. When no material is effective on
+or before the coding date, selection raises
+[`ReleaseUnavailableError`](../reference/exceptions.md) instead of falling
+back to a later release.
+
 > [!WARNING]
 > A fallback can change cohort labels or coding behavior. Record the resolved
 > release and use fallback only when that scientific or operational tradeoff

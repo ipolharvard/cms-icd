@@ -26,6 +26,7 @@ from cms_icd.models import Release
 from cms_icd.sources import (
     _LOCK_MARKER_NAME,
     CMS_CATALOG_URL,
+    CatalogEntry,
     CMSProvider,
     DirectoryProvider,
     _catalog_cache,
@@ -102,6 +103,18 @@ LEGACY_TABLE_CATALOG_HTML = """
   </ul>
 </body></html>
 """
+
+RELINK_URL_A = "https://www.cms.gov/files/zip/2026-code-tables-tabular-a.zip"
+RELINK_URL_B = "https://www.cms.gov/files/zip/2026-code-tables-tabular-b.zip"
+
+RELINK_CATALOG_HTML_A = f"""
+<html><body>
+  <a href="{RELINK_URL_A}">
+    2026 Code Tables, Tabular and Index (ZIP)
+  </a>
+</body></html>
+"""
+RELINK_CATALOG_HTML_B = RELINK_CATALOG_HTML_A.replace("tabular-a.zip", "tabular-b.zip")
 
 
 def test_default_cache_uses_namespaced_home_path(
@@ -235,6 +248,39 @@ def test_latest_for_fy_fallback_is_explicit() -> None:
     assert provider._select("cm", "tabular").release_date == date(2026, 4, 1)
 
 
+def test_service_date_fallback_never_selects_later_release() -> None:
+    provider = CMSProvider(
+        Release(2027, date(2026, 10, 15)),
+        service_date=date(2026, 10, 15),
+        fallback="latest_for_fy",
+    )
+    provider._catalog = (
+        CatalogEntry(
+            system="cm",
+            material="tabular",
+            fiscal_year=2027,
+            release_date=date(2027, 4, 1),
+            label="April 1, 2027 Code Tables, Tabular and Index (ZIP)",
+            url="https://www.cms.gov/files/zip/april-1-2027-code-tables.zip",
+            page_url=CMS_CATALOG_URL,
+        ),
+    )
+
+    with pytest.raises(ReleaseUnavailableError):
+        provider._select("cm", "tabular")
+
+
+def test_service_date_fallback_still_selects_earlier_release() -> None:
+    provider = CMSProvider(
+        Release(2026, date(2026, 2, 1)),
+        service_date=date(2026, 2, 1),
+        fallback="latest_for_fy",
+    )
+    provider._catalog = parse_catalog(CATALOG_HTML)
+
+    assert provider._select("cm", "tabular").release_date == date(2025, 10, 1)
+
+
 def test_distinct_matching_urls_are_ambiguous() -> None:
     provider = CMSProvider(Release(2026, date(2025, 10, 1)))
     provider._catalog = parse_catalog(
@@ -301,6 +347,25 @@ class InterruptedSession(FakeSession):
         return InterruptedResponse()
 
 
+class RelinkSession:
+    """Serve one archive variant per URL from a switchable catalog."""
+
+    def __init__(self) -> None:
+        self.catalog_html = RELINK_CATALOG_HTML_A
+        self.archives = {
+            RELINK_URL_A: _variant_archive("v1"),
+            RELINK_URL_B: _variant_archive("v2"),
+        }
+        self.downloads: dict[str, int] = {}
+
+    def get(self, url: str, **kwargs) -> FakeResponse:
+        del kwargs
+        if "coding-billing/icd-10-codes" in url:
+            return FakeResponse(text=self.catalog_html)
+        self.downloads[url] = self.downloads.get(url, 0) + 1
+        return FakeResponse(content=self.archives[url])
+
+
 def _cm_archive() -> bytes:
     buffer = io.BytesIO()
     with ZipFile(buffer, "w") as archive:
@@ -320,6 +385,16 @@ def _legacy_cm_archive() -> bytes:
         archive.writestr("Neoplasm.xml", "<ICD10CM.index/>")
         archive.writestr("E-Index.xml", "<ICD10CM.index/>")
         archive.writestr("Drug.xml", "<ICD10CM.index/>")
+    return buffer.getvalue()
+
+
+def _variant_archive(version: str) -> bytes:
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "icd10cm_tabular_2026.xml",
+            f"<ICD10CM.tabular>{version}</ICD10CM.tabular>",
+        )
     return buffer.getvalue()
 
 
@@ -423,6 +498,45 @@ def test_malformed_manifest_is_rebuilt(tmp_path: Path) -> None:
     assert paths[0].name == "icd10cm_tabular_2026.xml"
     assert json.loads(manifest.read_text())["system"] == "cm"
     assert session.downloads == 1
+
+
+def test_catalog_relink_rebuilds_extracted_material(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = RelinkSession()
+    release = Release(2026, date(2025, 10, 1))
+    provider = CMSProvider(
+        release,
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+    first = provider.paths("cm", "tabular")[0]
+    manifest_path = (
+        tmp_path / "fy2026" / "2025-10-01" / "cm" / "tabular" / "manifest.json"
+    )
+    assert first.read_text() == "<ICD10CM.tabular>v1</ICD10CM.tabular>"
+    assert json.loads(manifest_path.read_text())["url"] == RELINK_URL_A
+
+    # CMS republishes the same (fiscal year, release date, material) tuple
+    # under a new URL; a catalog refresh makes the relink discoverable.
+    session.catalog_html = RELINK_CATALOG_HTML_B
+    monkeypatch.setattr("cms_icd.sources.requests.Session", lambda: session)
+    refresh_cms_catalog(cache_dir=tmp_path)
+
+    offline = CMSProvider(release, cache_dir=tmp_path, offline=True)
+    with pytest.raises(DownloadError, match="cached CMS artifact"):
+        offline.paths("cm", "tabular")
+
+    relinked = CMSProvider(
+        release,
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+    second = relinked.paths("cm", "tabular")[0]
+
+    assert second.read_text() == "<ICD10CM.tabular>v2</ICD10CM.tabular>"
+    assert json.loads(manifest_path.read_text())["url"] == RELINK_URL_B
+    assert session.downloads == {RELINK_URL_A: 1, RELINK_URL_B: 1}
 
 
 def test_invalid_zip_payload_is_rejected(tmp_path: Path) -> None:

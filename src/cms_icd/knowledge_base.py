@@ -438,7 +438,10 @@ class ICD10KnowledgeBase:
             service_date: Date that controls coding for the record.
             cache_dir: Persistent artifact cache directory. ``None`` uses the
                 platform default cache directory.
-            fallback: Set to ``"latest_for_fy"`` to permit an explicit fallback.
+            fallback: Set to ``"latest_for_fy"`` to permit an explicit
+                fallback. The fallback never selects material effective after
+                ``service_date``; when no material is effective on or before
+                the coding date, selection raises ``ReleaseUnavailableError``.
             offline: Require the catalog and artifacts to already be cached.
         """
         release = Release(fiscal_year_for(service_date), service_date)
