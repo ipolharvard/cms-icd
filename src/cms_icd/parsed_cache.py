@@ -204,19 +204,20 @@ def _gem_from_payload(payload: object) -> GEMStore:
         raise TypeError("Invalid cached GEM payload")
     grouped: dict[str, list[GEMEntry]] = {}
     for row in payload["rows"]:
+        source = str(row[0]).upper()
         entry = GEMEntry(
-            source=str(row[0]),
-            target=None if row[1] is None else str(row[1]),
+            source=source,
+            target=None if row[1] is None else str(row[1]).upper(),
             approximate=bool(row[2]),
             no_map=bool(row[3]),
             combination=bool(row[4]),
             scenario=int(row[5]),
             choice_list=int(row[6]),
         )
-        grouped.setdefault(entry.source, []).append(entry)
+        grouped.setdefault(source, []).append(entry)
     provenance: dict[str, GEMProvenance] = {}
     for row in payload.get("provenance") or ():
-        provenance[str(row[0])] = GEMProvenance(
+        provenance[str(row[0]).upper()] = GEMProvenance(
             vocabulary_release=_release_from_payload(row[1]),  # type: ignore[arg-type]
             selected_mapping_release=_release_from_payload(row[2]),  # type: ignore[arg-type]
             reviewed_through_release=_release_from_payload(row[3]),  # type: ignore[arg-type]

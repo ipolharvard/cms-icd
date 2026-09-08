@@ -13,6 +13,7 @@ from cms_icd.gems import _backport_corrections
 from cms_icd.knowledge_base import ICD10KnowledgeBase
 from cms_icd.models import Code, Guideline, Node, Release, Term
 from cms_icd.parsed_cache import (
+    _gem_from_payload,
     _memory,
     load_corrected_gem_store,
     load_gem_store,
@@ -51,6 +52,21 @@ def test_raw_gem_store_is_loaded_from_persistent_parsed_cache(
 
     assert second["0010"] == first["0010"]
     assert list((provider.cache_dir / "_derived" / "v1" / "gems").iterdir())
+
+
+def test_legacy_gem_cache_payload_is_normalized_to_canonical_case() -> None:
+    store = _gem_from_payload(
+        {
+            "system": "cm",
+            "direction": "icd9_to_icd10",
+            "release": None,
+            "rows": [["e123", "r311", False, False, False, 0, 0]],
+            "provenance": [],
+        }
+    )
+
+    assert store["E123"][0].source == "E123"
+    assert store["E123"][0].target == "R311"
 
 
 def test_parsed_cache_corruption_and_source_change_rebuild(
