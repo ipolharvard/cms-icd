@@ -80,7 +80,12 @@ def _common_ancestor(
     targets = tuple(entry.target for entry in entries if entry.target is not None)
     if not targets:
         return None
-    ancestor = tabular.lowest_common_ancestor(targets)
+    try:
+        ancestor = tabular.lowest_common_ancestor(targets)
+    except KeyError:
+        # A target missing from the selected tabular vocabulary has no usable
+        # common ancestor; the caller reports the source as unmappable.
+        return None
     if ancestor is None or not isinstance(ancestor, Code):
         return None
     code = ancestor.name.replace(".", "")

@@ -21,6 +21,7 @@ from cms_icd import (
     resolve_icd9_to_icd10_pcs_mapping,
 )
 from cms_icd.models import Code, GEMDirection, Node, Release
+from cms_icd.parsers import parse_gems
 from cms_icd.resolution import (
     _discover_years,
     _resolution_cache,
@@ -165,6 +166,78 @@ def test_cm_resolves_simple_alternatives_to_common_ancestor(
 
     assert resolved.target_codes == ("R31",)
     assert resolved.reason is ICDMappingReason.COMMON_ANCESTOR
+
+
+def test_cm_lowercase_file_target_resolves_by_canonical_lookup(
+    tmp_path, tabular: TabularStore
+) -> None:
+    path = tmp_path / "2018_I9gem.txt"
+    path.write_text("4860 r311 10000\n4860 R3121 10000\n", encoding="ascii")
+
+    store = parse_gems((path,), system="cm", direction=GEMDirection.ICD9_TO_ICD10)
+
+    resolved = _resolve_cm_mapping(store.mapping("4860"), tabular=tabular)
+
+    assert resolved.status is ICDMappingStatus.MAPPED
+    assert resolved.reason is ICDMappingReason.COMMON_ANCESTOR
+    assert resolved.target_codes == ("R31",)
+
+
+def test_cm_alternatives_missing_from_tabular_are_unmappable(
+    tabular: TabularStore,
+) -> None:
+    mapping = GEMMapping(
+        "4255",
+        (_entry("4255", "R311"), _entry("4255", "Z999")),
+        (),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_ALTERNATIVES
+    assert resolved.target_codes == ()
+
+
+def test_cm_scenario_alternatives_missing_from_tabular_are_unmappable(
+    tabular: TabularStore,
+) -> None:
+    mapping = GEMMapping(
+        "4256",
+        (),
+        (
+            GEMScenario(
+                1,
+                (
+                    GEMChoiceList(
+                        1,
+                        (
+                            _entry(
+                                "4256",
+                                "R311",
+                                combination=True,
+                                scenario=1,
+                                choice=1,
+                            ),
+                            _entry(
+                                "4256",
+                                "Z999",
+                                combination=True,
+                                scenario=1,
+                                choice=1,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    resolved = _resolve_cm_mapping(mapping, tabular=tabular)
+
+    assert resolved.status is ICDMappingStatus.UNMAPPABLE
+    assert resolved.reason is ICDMappingReason.DIVERGENT_SCENARIOS
+    assert resolved.target_codes == ()
 
 
 def test_cm_no_map_is_unmappable(tabular: TabularStore) -> None:
@@ -563,6 +636,36 @@ def test_bulk_and_single_year_cm_apis_share_resolution(
     assert single["0020"].target_codes == ("A70",)
     with pytest.raises(TypeError):
         bulk[2019] = single  # type: ignore[index]
+
+
+def test_bulk_cm_resolution_survives_target_missing_from_tabular(
+    monkeypatch: pytest.MonkeyPatch, tabular: TabularStore
+) -> None:
+    release = Release(2018, date(2017, 10, 1))
+    store = GEMStore(
+        {
+            "0020": (_entry("0020", "A70"),),
+            "4255": (_entry("4255", "R311"), _entry("4255", "Z999")),
+        },
+        system="cm",
+        direction=GEMDirection.ICD9_TO_ICD10,
+        release=release,
+    )
+    gems = SimpleNamespace(cm=SimpleNamespace(icd9_to_icd10=store))
+    knowledge = SimpleNamespace(cm=SimpleNamespace(tabular=tabular))
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **_: gems,
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution.ICD10KnowledgeBase.from_cms", lambda **_: knowledge
+    )
+
+    resolved = resolve_icd9_to_icd10_cm_mappings((2018,))
+
+    assert resolved[2018]["0020"].target_codes == ("A70",)
+    assert resolved[2018]["4255"].status is ICDMappingStatus.UNMAPPABLE
+    assert resolved[2018]["4255"].reason is ICDMappingReason.DIVERGENT_ALTERNATIVES
 
 
 def test_fingerprintless_store_keys_are_stable_under_object_lifetime(

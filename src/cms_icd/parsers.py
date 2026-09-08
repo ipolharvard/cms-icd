@@ -32,7 +32,8 @@ _GEM_FILENAMES: dict[tuple[str, GEMDirection], tuple[str, ...]] = {
 }
 
 # Official GEM files encode codes without dots or separators. Matching is
-# case-insensitive because a few official rows use lowercase letters.
+# case-insensitive because a few official rows use lowercase letters, and
+# parsed codes are stored in uppercase canonical case.
 _ICD9_CM_DIAGNOSIS = re.compile(r"E\d{3,4}|V\d{2,4}|\d{3,5}")
 _ICD9_CM_PROCEDURE = re.compile(r"\d{3,4}")
 _ICD10_CM_DIAGNOSIS = re.compile(r"[A-Z]\d[A-Z0-9]{1,5}")
@@ -80,8 +81,10 @@ def parse_gems(
 ) -> GEMStore:
     """Parse one official CMS General Equivalence Mapping direction.
 
-    Codes remain strings so leading zeroes are preserved. Exactly one supplied file must
-    match the requested system and direction.
+    Codes remain strings so leading zeroes are preserved and are normalized to
+    uppercase canonical case: official lowercase rows parse to the same keys and
+    targets as their uppercase spellings. Exactly one supplied file must match the
+    requested system and direction.
     """
     if system not in {"cm", "pcs"}:
         raise ValueError(f"Unsupported GEM system: {system!r}")
@@ -135,19 +138,23 @@ def parse_gems(
         # Some official reverse PCS releases encode NoI9 with 10000 rather than
         # setting the documented no-map bit. The sentinel is authoritative.
         no_map = no_map_flag or is_sentinel
-        if not source_pattern.fullmatch(source.upper()):
+        # Official files are validated case-insensitively; store the uppercase
+        # canonical forms so lookups and release comparisons stay consistent.
+        canonical_source = source.upper()
+        canonical_target = raw_target.upper()
+        if not source_pattern.fullmatch(canonical_source):
             raise ParseError(
                 f"GEM source code {source!r} at {path}:{line_number} does not "
                 f"match the {source_label} layout"
             )
-        if not is_sentinel and not target_pattern.fullmatch(raw_target.upper()):
+        if not is_sentinel and not target_pattern.fullmatch(canonical_target):
             raise ParseError(
                 f"GEM target code {raw_target!r} at {path}:{line_number} does not "
                 f"match the {target_label} layout"
             )
-        target = None if no_map else raw_target
+        target = None if no_map else canonical_target
         entry = GEMEntry(
-            source=source,
+            source=canonical_source,
             target=target,
             approximate=approximate,
             no_map=no_map,
@@ -155,7 +162,7 @@ def parse_gems(
             scenario=int(flags[3]),
             choice_list=int(flags[4]),
         )
-        grouped.setdefault(source, []).append(entry)
+        grouped.setdefault(canonical_source, []).append(entry)
     return GEMStore(
         {source: tuple(entries) for source, entries in grouped.items()},
         system=system,
