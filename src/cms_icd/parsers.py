@@ -561,12 +561,19 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
         raw_title = _index_title(element)
         title, modifiers = _extract_modifiers(raw_title)
         cells = []
+        seen_columns: set[int] = set()
         for cell in element.findall("cell"):
             value = (cell.text or "").strip()
             if value and value != "-":
                 column = _int_attrib(
                     cell, "col", path=path, context=f"index term {title!r}"
                 )
+                if column in seen_columns:
+                    raise ParseError(
+                        f"Duplicate cell column {column} in {path} "
+                        f"(index term {title!r})"
+                    )
+                seen_columns.add(column)
                 cells.append((column, value))
         code = (element.findtext("code") or "").strip() or None
         manifestation = (element.findtext("manif") or "").strip() or None
@@ -604,7 +611,7 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                     "id": cell_id,
                     "title": headings.get(column, f"Column {column}"),
                     "parent_id": identifier,
-                    "children_ids": [],
+                    "children_ids": (),
                     "path": f"{term_path}, {headings.get(column, f'Column {column}')}",
                     "code": value if cell_range else value.rstrip("."),
                     "manifestation_code": None,
@@ -624,6 +631,9 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
                 source=source,
                 parent_path=term_path,
             )
+        # Freeze the mutable builder list now that all cell and child appends
+        # are done, so the published Term matches its tuple-typed annotation.
+        drafts[identifier]["children_ids"] = tuple(children)
 
     for path in paths:
         try:
