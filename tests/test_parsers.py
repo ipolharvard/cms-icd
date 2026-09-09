@@ -766,6 +766,41 @@ def test_cm_guideline_leaf_content_excludes_its_own_heading() -> None:
     assert chapter_rendered.count("Ninth rule") == 1
 
 
+def test_cm_guideline_container_preamble_excludes_split_heading() -> None:
+    pages = (
+        _GuidelinePage(
+            "Section I. Con ventions\n"
+            "Introductory text for the conventions section.\n"
+            "Conventions apply to all codes.\n"
+        ),
+        _GuidelinePage(
+            "A. Basic conventions\n"
+            "1. First rule\n"
+            "Body of first rule.\n"
+            "2. Second rule\n"
+            "Body of second rule.\n"
+            "C. Coding rules\n"
+            "9. Ninth rule\n"
+            "Body of ninth rule.\n"
+        ),
+    )
+    reader = _GuidelineReader(list(pages))
+    store = _structured_cm_guidelines(
+        reader,
+        "guidelines.pdf",  # type: ignore[arg-type]
+    )
+
+    assert store.preambles["I"] == (
+        "Introductory text for the conventions section.\n"
+        "Conventions apply to all codes."
+    )
+    assert store["I.A.1"].content == "Body of first rule."
+
+    cm = ICD10CMKnowledgeBase.from_stores(guidelines=store)
+    rendered = cm.render_guidelines(["I.A.1"]).content
+    assert "Con ventions" not in rendered
+
+
 def test_guideline_page_text_joins_only_plausible_code_shapes() -> None:
     page = _GuidelinePage(
         "Administer a dose of A 100 mg with water.\n"
