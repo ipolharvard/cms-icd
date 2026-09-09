@@ -441,6 +441,18 @@ def test_index_rejects_file_without_terms(tmp_path: Path) -> None:
         parse_index((path,), system="cm")
 
 
+def test_index_parser_main_term_without_title_raises_parse_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10cm_index.xml"
+    path.write_text(
+        INDEX_XML.replace("      <title>Hypertension (arterial)</title>\n", "")
+    )
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_index((path,), system="cm")
+
+
 @pytest.mark.parametrize(
     ("filename", "source"),
     [

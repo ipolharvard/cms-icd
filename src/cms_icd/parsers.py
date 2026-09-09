@@ -695,6 +695,10 @@ def parse_index(paths: tuple[Path, ...], *, system: str) -> IndexStore:
         for element in main_terms:
             top_counter += 1
             identifier = f"{top_counter:06d}"
+            if not _index_title(element):
+                raise ParseError(
+                    f"Missing main term title in {path} (main term {top_counter})"
+                )
             insert(
                 element,
                 parent_id="",
