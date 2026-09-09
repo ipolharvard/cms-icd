@@ -345,9 +345,63 @@ def test_cm_tabular_rejects_file_without_chapters(tmp_path: Path) -> None:
         parse_cm_tabular(path)
 
 
+def test_cm_tabular_rejects_chapter_without_name(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text(CM_XML.replace("    <name>9</name>\n", ""))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_cm_tabular(path)
+
+
+def test_cm_tabular_rejects_section_without_id(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text(CM_XML.replace('    <section id="I10-I16">', "    <section>"))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_cm_tabular(path)
+
+
 def test_pcs_tabular_rejects_file_without_tables(tmp_path: Path) -> None:
     path = tmp_path / "icd10pcs_tables.xml"
     path.write_text("<ICD10PCS.tabular>\n</ICD10PCS.tabular>\n")
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_table_axis_label_without_code_raises_parse_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace('<label code="0">Medical</label>', "<label>Medical</label>")
+    )
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_row_axis_label_without_code_raises_parse_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace('<label code="0">Brain</label>', "<label>Brain</label>")
+    )
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_row_axis_without_labels_raises_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace('<axis pos="4" values="2">', '<axis pos="4">').replace(
+            '        <label code="0">Brain</label>\n'
+            '        <label code="1">Meninges</label>\n',
+            "",
+        )
+    )
 
     with pytest.raises(ParseError, match=re.escape(path.name)):
         parse_pcs_tabular(path)

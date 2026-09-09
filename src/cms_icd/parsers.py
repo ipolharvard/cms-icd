@@ -360,6 +360,8 @@ def parse_cm_tabular(path: str | Path) -> TabularStore:
     _add_draft(drafts, _NodeDraft("cm", "cm"))
     for chapter in chapters:
         chapter_name = chapter.findtext("name", "").strip()
+        if not chapter_name:
+            raise ParseError(f"Missing chapter name in {path}")
         sections = chapter.findall("section")
         chapter_id = f"cm_{chapter_name}"
         chapter_draft = _NodeDraft(
@@ -374,6 +376,10 @@ def parse_cm_tabular(path: str | Path) -> TabularStore:
         _add_draft(drafts, chapter_draft)
         for section in sections:
             section_name = section.attrib.get("id", "")
+            if not section_name:
+                raise ParseError(
+                    f"Missing section id in {path} (chapter {chapter_name!r})"
+                )
             section_id = f"{chapter_id}_{section_name}"
             section_draft = _NodeDraft(
                 id=section_id,
@@ -425,13 +431,14 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                 raise ParseError(
                     f"PCS table {table_number} has an axis without a label"
                 )
-            table_axes.append(
-                (
-                    label.attrib.get("code", ""),
-                    axis.findtext("title", "").strip(),
-                    (label.text or "").strip(),
+            axis_title = axis.findtext("title", "").strip()
+            code = label.attrib.get("code", "")
+            if not code:
+                raise ParseError(
+                    f"Missing label code in {path} "
+                    f"(PCS table {table_number}, axis {axis_title!r})"
                 )
-            )
+            table_axes.append((code, axis_title, (label.text or "").strip()))
         prefix = "".join(code for code, _, _ in table_axes)
         table_id = prefix or f"pcs_table_{table_number}"
         rows = table.findall("pcsRow")
@@ -458,13 +465,20 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
             axes: list[list[tuple[str, str]]] = []
             for axis in row.findall("axis"):
                 title = axis.findtext("title", "").strip()
-                labels = [
-                    (
-                        label.attrib.get("code", ""),
-                        f"{title}: {(label.text or '').strip()}",
+                labels: list[tuple[str, str]] = []
+                for label in axis.findall("label"):
+                    code = label.attrib.get("code", "")
+                    if not code:
+                        raise ParseError(
+                            f"Missing label code in {path} "
+                            f"(table {table_id}, row {row_number}, axis {title!r})"
+                        )
+                    labels.append((code, f"{title}: {(label.text or '').strip()}"))
+                if not labels:
+                    raise ParseError(
+                        f"PCS row axis has no labels in {path} "
+                        f"(table {table_id}, row {row_number}, axis {title!r})"
                     )
-                    for label in axis.findall("label")
-                ]
                 declared = _int_attrib(
                     axis,
                     "values",
