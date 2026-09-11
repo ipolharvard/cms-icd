@@ -69,8 +69,8 @@ clear_memory_caches()
 
 Pass `MemoryCache` members or their string values to clear only selected layers.
 Releasing in-memory state does not modify persistent cache files. See the
-[cache API reference](../reference/caches.md) for selectors and individual
-cache-clearing functions.
+[cache API reference](../reference/caches.md) for the `MemoryCache` selectors
+and `clear_memory_caches`.
 
 ## Refresh the CMS catalog
 
