@@ -713,6 +713,29 @@ def test_cm_guideline_parser_requires_structured_outline(tmp_path: Path) -> None
         parse_guidelines(path, system="cm")
 
 
+@pytest.mark.parametrize(
+    "system",
+    [
+        "cm",
+        "pcs",
+    ],
+)
+def test_guideline_parser_wraps_extraction_failure_in_parse_error(
+    tmp_path: Path, system: str
+) -> None:
+    # An encrypted PDF that PdfReader accepts but that fails during extraction;
+    # extraction previously leaked pypdf.errors.FileNotDecryptedError.
+    path = tmp_path / "guidelines.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.encrypt("secret")
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_guidelines(path, system=system)
+
+
 def test_guideline_parser_rejects_unknown_system(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unsupported guideline system"):
         parse_guidelines(tmp_path / "unused.pdf", system="icd9")

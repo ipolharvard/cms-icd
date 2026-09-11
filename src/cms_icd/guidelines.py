@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from pypdf import PdfReader
 
-from .exceptions import ParseError
+from .exceptions import ICDKnowledgeBaseError, ParseError
 from .models import Guideline
 from .stores import GuidelineStore
 
@@ -270,5 +270,11 @@ def parse_guidelines(path: str | Path, *, system: str) -> GuidelineStore:
                 {"document": guideline}, {"document": guideline.title}
             )
         return _structured_cm_guidelines(document, path)
+    except ICDKnowledgeBaseError:
+        raise
+    except Exception as exc:
+        raise ParseError(
+            f"Unable to parse ICD-10-{system.upper()} guidelines {path}: {exc}"
+        ) from exc
     finally:
         document.close()
