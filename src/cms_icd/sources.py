@@ -78,6 +78,26 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _validate_downloaded_artifact(path: Path, suffix: str, url: str) -> None:
+    """Raise DownloadError when a downloaded body is not a usable container.
+
+    A body that is neither an openable ZIP nor a ``%PDF`` file must not be committed to
+    the artifact cache, or every later resolution of the URL would deterministically re-
+    raise until the cache is removed by hand.
+    """
+    try:
+        if suffix.lower() == ".pdf":
+            with path.open("rb") as handle:
+                signature = handle.read(5)
+            if not signature.startswith(b"%PDF-"):
+                raise DownloadError(f"CMS artifact is not a valid PDF file: {url}")
+        else:
+            with ZipFile(path) as archive:
+                archive.infolist()
+    except BadZipFile as exc:
+        raise DownloadError(f"CMS artifact is not a valid ZIP file: {url}") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class CatalogEntry:
     """One downloadable material advertised by CMS."""
@@ -131,7 +151,13 @@ def _fetch_catalog(session: requests.Session) -> tuple[CatalogEntry, ...]:
         except requests.RequestException as exc:
             raise DownloadError(f"Unable to read CMS ICD catalog {url}: {exc}") from exc
         entries.extend(parse_catalog(response.text, url))
-    return tuple(dict.fromkeys(entries))
+    entries = tuple(dict.fromkeys(entries))
+    if not entries:
+        # A zero-entry parse (e.g. a CMS error page served with HTTP 200)
+        # must never be cached: an empty catalog.json is treated as valid
+        # and would hide the fetch failure until release resolution.
+        raise DownloadError("CMS ICD catalog returned no materials")
+    return entries
 
 
 def _write_catalog(path: Path, entries: tuple[CatalogEntry, ...]) -> None:
@@ -197,7 +223,9 @@ def refresh_cms_catalog(*, cache_dir: str | Path | None = None) -> None:
     """Fetch and atomically replace the cached CMS material catalog.
 
     Normal online constructors reuse a valid cached catalog indefinitely. Call this
-    function when newly advertised CMS releases should become discoverable.
+    function when newly advertised CMS releases should become discoverable. A fetch that
+    parses to zero entries raises :class:`DownloadError` and leaves the cached catalog
+    unchanged.
     """
     selected = Path(cache_dir) if cache_dir is not None else default_cache_dir()
     _shared_catalog(
@@ -894,6 +922,7 @@ class CMSProvider(MaterialProvider):
                         if chunk:
                             handle.write(chunk)
                             digest.update(chunk)
+                _validate_downloaded_artifact(temporary, suffix, entry.url)
                 staging = artifact_dir.with_name(artifact_dir.name + ".tmp")
                 shutil.rmtree(staging, ignore_errors=True)
                 staging.mkdir()

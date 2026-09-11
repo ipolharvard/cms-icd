@@ -347,6 +347,18 @@ class InterruptedSession(FakeSession):
         return InterruptedResponse()
 
 
+class EmptyCatalogSession(FakeSession):
+    """Serve catalog pages that parse to zero entries."""
+
+    def get(self, url: str, **kwargs):
+        del kwargs
+        if "coding-billing/icd-10-codes" in url:
+            self.catalog_reads += 1
+            return FakeResponse(text="<html><body>no materials</body></html>")
+        self.downloads += 1
+        return FakeResponse(content=self.archive)
+
+
 class RelinkSession:
     """Serve one archive variant per URL from a switchable catalog."""
 
@@ -549,6 +561,9 @@ def test_invalid_zip_payload_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(DownloadError, match="not a valid ZIP"):
         provider.paths("cm", "tabular")
 
+    assert not list(tmp_path.rglob("artifact*"))
+    assert not list(tmp_path.rglob("sha256"))
+
 
 def test_invalid_direct_pdf_payload_is_rejected(tmp_path: Path) -> None:
     provider = CMSProvider(
@@ -559,6 +574,37 @@ def test_invalid_direct_pdf_payload_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(DownloadError, match="not a valid PDF"):
         provider.paths("cm", "guidelines")
+
+    assert not list(tmp_path.rglob("artifact*"))
+    assert not list(tmp_path.rglob("sha256"))
+
+
+def test_invalid_payload_is_not_committed_and_retry_re_downloads(
+    tmp_path: Path,
+) -> None:
+    release = Release(2026, date(2025, 10, 1))
+    bad_provider = CMSProvider(
+        release,
+        cache_dir=tmp_path,
+        session=FakeSession(b"<html>not a zip</html>"),  # type: ignore[arg-type]
+    )
+    with pytest.raises(DownloadError, match="not a valid ZIP"):
+        bad_provider.paths("cm", "tabular")
+
+    assert not list(tmp_path.rglob("artifact*"))
+    assert not list(tmp_path.rglob("sha256"))
+    assert not list(tmp_path.rglob("tmp*"))
+
+    good_session = FakeSession(_cm_archive())
+    good_provider = CMSProvider(
+        release,
+        cache_dir=tmp_path,
+        session=good_session,  # type: ignore[arg-type]
+    )
+    paths = good_provider.paths("cm", "tabular")
+
+    assert [path.name for path in paths] == ["icd10cm_tabular_2026.xml"]
+    assert good_session.downloads == 1
 
 
 def test_interrupted_download_cleans_temporary_file(tmp_path: Path) -> None:
@@ -652,6 +698,53 @@ def test_catalog_is_reused_until_explicit_refresh(
     refresh_cms_catalog(cache_dir=tmp_path)
 
     assert refreshed_session.catalog_reads == 2
+
+
+def test_zero_entry_catalog_is_not_written_on_first_load(tmp_path: Path) -> None:
+    session = EmptyCatalogSession(b"")
+    provider = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(DownloadError, match="no materials"):
+        provider.paths("cm", "tabular")
+
+    assert session.catalog_reads == 2
+    assert not (tmp_path / "catalog.json").exists()
+    assert not list(tmp_path.rglob("catalog.json*"))
+
+    recovered = CMSProvider(
+        Release(2026, date(2025, 10, 1)),
+        cache_dir=tmp_path,
+        session=FakeSession(_cm_archive()),  # type: ignore[arg-type]
+    )
+    assert recovered._load_catalog()
+
+
+def test_zero_entry_refresh_preserves_valid_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = Release(2026, date(2025, 10, 1))
+    provider = CMSProvider(
+        release,
+        cache_dir=tmp_path,
+        session=FakeSession(_cm_archive()),  # type: ignore[arg-type]
+    )
+    paths = provider.paths("cm", "tabular")
+    catalog_before = (tmp_path / "catalog.json").read_text(encoding="utf-8")
+
+    monkeypatch.setattr(
+        "cms_icd.sources.requests.Session", lambda: EmptyCatalogSession(b"")
+    )
+    with pytest.raises(DownloadError, match="no materials"):
+        refresh_cms_catalog(cache_dir=tmp_path)
+
+    assert (tmp_path / "catalog.json").read_text(encoding="utf-8") == catalog_before
+
+    offline = CMSProvider(release, cache_dir=tmp_path, offline=True)
+    assert offline.paths("cm", "tabular") == paths
 
 
 def test_directory_provider_reports_missing_and_ambiguous_files(
