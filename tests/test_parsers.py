@@ -14,7 +14,7 @@ from cms_icd.guidelines import (
     _text_position,
     parse_guidelines,
 )
-from cms_icd.knowledge_base import ICD10CMKnowledgeBase
+from cms_icd.knowledge_base import ICD10CMKnowledgeBase, ICD10PCSKnowledgeBase
 from cms_icd.models import Code, Node, Term
 from cms_icd.parsers import parse_cm_tabular, parse_index, parse_pcs_tabular
 from cms_icd.stores import IndexStore, TabularStore
@@ -361,6 +361,24 @@ def test_cm_tabular_rejects_section_without_id(tmp_path: Path) -> None:
         parse_cm_tabular(path)
 
 
+def test_cm_tabular_rejects_whitespace_only_section_id(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text(CM_XML.replace('id="I10-I16"', 'id="   "'))
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_cm_tabular(path)
+
+
+def test_cm_tabular_strips_section_id_whitespace(tmp_path: Path) -> None:
+    path = tmp_path / "icd10cm_tabular.xml"
+    path.write_text(CM_XML.replace('id="I10-I16"', 'id=" I10-I16 "'))
+
+    store = parse_cm_tabular(path)
+
+    assert store["cm_9_I10-I16"].name == "I10-I16"
+    assert [node.id for node in store.children("cm_9")] == ["cm_9_I10-I16"]
+
+
 def test_pcs_tabular_rejects_file_without_tables(tmp_path: Path) -> None:
     path = tmp_path / "icd10pcs_tables.xml"
     path.write_text("<ICD10PCS.tabular>\n</ICD10PCS.tabular>\n")
@@ -381,12 +399,40 @@ def test_pcs_parser_table_axis_label_without_code_raises_parse_error(
         parse_pcs_tabular(path)
 
 
+def test_pcs_parser_table_axis_label_whitespace_only_code_raises_parse_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace(
+            '<label code="0">Medical</label>', '<label code="   ">Medical</label>'
+        )
+    )
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
 def test_pcs_parser_row_axis_label_without_code_raises_parse_error(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "icd10pcs_tables.xml"
     path.write_text(
         PCS_XML.replace('<label code="0">Brain</label>', "<label>Brain</label>")
+    )
+
+    with pytest.raises(ParseError, match=re.escape(path.name)):
+        parse_pcs_tabular(path)
+
+
+def test_pcs_parser_row_axis_label_whitespace_only_code_raises_parse_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace(
+            '<label code="0">Brain</label>', '<label code="   ">Brain</label>'
+        )
     )
 
     with pytest.raises(ParseError, match=re.escape(path.name)):
@@ -405,6 +451,41 @@ def test_pcs_parser_row_axis_without_labels_raises_parse_error(tmp_path: Path) -
 
     with pytest.raises(ParseError, match=re.escape(path.name)):
         parse_pcs_tabular(path)
+
+
+def test_pcs_parser_strips_label_code_whitespace(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(
+        PCS_XML.replace(
+            '<label code="0">Medical</label>', '<label code=" 0 ">Medical</label>'
+        ).replace('<label code="0">Brain</label>', '<label code=" 0 ">Brain</label>')
+    )
+
+    store = parse_pcs_tabular(path)
+
+    assert [node.id for node in store.children("0AB")] == ["0AB_1"]
+    assert [node.name for node in store.leaves("pcs")] == ["0AB0", "0AB1"]
+
+
+def test_pcs_table_container_is_a_node_not_a_code(tmp_path: Path) -> None:
+    path = tmp_path / "icd10pcs_tables.xml"
+    path.write_text(PCS_XML)
+    store = parse_pcs_tabular(path)
+
+    container = store.by_code("0AB")
+    assert type(container) is Node
+    assert container.name == "0AB"
+    assert store.contains_code("0AB") is False
+    assert "0AB" not in store.lookup
+    assert [node.id for node in store.children("0AB")] == ["0AB_1"]
+    assert [node.name for node in store.leaves("pcs")] == ["0AB0", "0AB1"]
+    assert [node.id for node in store.parents("0AB0")] == ["0AB_1", "0AB", "pcs"]
+
+    kb = ICD10PCSKnowledgeBase.from_stores(tabular=store)
+    assert "0AB" not in kb
+    with pytest.raises(KeyError):
+        kb["0AB"]
+    assert "0AB0" in kb
 
 
 def test_index_rejects_pcs_tables_root(tmp_path: Path) -> None:

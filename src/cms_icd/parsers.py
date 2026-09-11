@@ -179,6 +179,7 @@ class _NodeDraft:
     parent_id: str = ""
     children_ids: list[str] = field(default_factory=list)
     assignable: bool = False
+    as_node: bool = False
     min: str = ""
     max: str = ""
     notes: list[str] = field(default_factory=list)
@@ -209,7 +210,12 @@ class _NodeDraft:
             "code_first": tuple(self.code_first),
             "code_also": tuple(self.code_also),
         }
-        if self.id in {"cm", "pcs"} or not self.name or self.name != self.id:
+        if (
+            self.as_node
+            or self.id in {"cm", "pcs"}
+            or not self.name
+            or self.name != self.id
+        ):
             return Node(**common)
         return Code(
             **common,
@@ -375,7 +381,7 @@ def parse_cm_tabular(path: str | Path) -> TabularStore:
         _apply_cm_notes(chapter_draft, chapter)
         _add_draft(drafts, chapter_draft)
         for section in sections:
-            section_name = section.attrib.get("id", "")
+            section_name = section.attrib.get("id", "").strip()
             if not section_name:
                 raise ParseError(
                     f"Missing section id in {path} (chapter {chapter_name!r})"
@@ -432,7 +438,7 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                     f"PCS table {table_number} has an axis without a label"
                 )
             axis_title = axis.findtext("title", "").strip()
-            code = label.attrib.get("code", "")
+            code = label.attrib.get("code", "").strip()
             if not code:
                 raise ParseError(
                     f"Missing label code in {path} "
@@ -442,6 +448,7 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
         prefix = "".join(code for code, _, _ in table_axes)
         table_id = prefix or f"pcs_table_{table_number}"
         rows = table.findall("pcsRow")
+        # The table prefix identifies a structural container, not a PCS code.
         _add_draft(
             drafts,
             _NodeDraft(
@@ -449,6 +456,7 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                 name=table_id,
                 description=f"PCS table {table_number}",
                 parent_id="pcs",
+                as_node=True,
             ),
         )
         for row_number, row in enumerate(rows, start=1):
@@ -467,7 +475,7 @@ def parse_pcs_tabular(path: str | Path) -> TabularStore:
                 title = axis.findtext("title", "").strip()
                 labels: list[tuple[str, str]] = []
                 for label in axis.findall("label"):
-                    code = label.attrib.get("code", "")
+                    code = label.attrib.get("code", "").strip()
                     if not code:
                         raise ParseError(
                             f"Missing label code in {path} "
