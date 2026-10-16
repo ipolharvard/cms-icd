@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import weakref
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -12,13 +12,16 @@ from cms_icd import (
     GEMMapping,
     GEMScenario,
     GEMStore,
+    ICDCMMappingResolution,
     ICDMappingReason,
     ICDMappingStatus,
+    ICDPCSMappingResolution,
     MemoryCache,
     clear_memory_caches,
     resolve_icd9_to_icd10_cm_mapping,
     resolve_icd9_to_icd10_cm_mappings,
     resolve_icd9_to_icd10_pcs_mapping,
+    resolve_icd9_to_icd10_pcs_mappings,
 )
 from cms_icd.models import Code, GEMDirection, Node, Release
 from cms_icd.parsers import parse_gems
@@ -722,6 +725,293 @@ def test_empty_bulk_request_does_not_load_materials(
     )
 
     assert not resolve_icd9_to_icd10_cm_mappings(())
+
+
+@pytest.mark.parametrize("kind", ["cm", "pcs"])
+def test_frame_output_matches_mapping_and_reuses_resolution(
+    monkeypatch, tabular: TabularStore, kind: str
+) -> None:
+    pl = pytest.importorskip("polars")
+    from polars.testing import assert_frame_equal
+
+    bulk_api = (
+        resolve_icd9_to_icd10_cm_mappings
+        if kind == "cm"
+        else resolve_icd9_to_icd10_pcs_mappings
+    )
+    single_api = (
+        resolve_icd9_to_icd10_cm_mapping
+        if kind == "cm"
+        else resolve_icd9_to_icd10_pcs_mapping
+    )
+    targets = ("A70", "J17") if kind == "cm" else ("0WQF0ZZ", "0WQF0ZZ")
+    stores = {}
+    for year in (2017, 2018):
+        stores[year] = GEMStore(
+            {
+                "0730": (
+                    _entry("0730", targets[0], combination=True, scenario=1, choice=1),
+                    _entry("0730", targets[1], combination=True, scenario=1, choice=2),
+                ),
+                "0010": (_entry("0010", None),),
+                "0040": (
+                    _entry("0040", "A70" if kind == "cm" else "0WQF0ZZ"),
+                    _entry("0040", "A70" if kind == "cm" else "0WQF3ZZ"),
+                ),
+            },
+            system=kind,
+            direction=GEMDirection.ICD9_TO_ICD10,
+            release=Release(year, date(year - 1, 10, 1)),
+        )
+    acquired = []
+
+    def gems(**kwargs):
+        acquired.append(kwargs)
+        return SimpleNamespace(
+            **{kind: SimpleNamespace(icd9_to_icd10=stores[kwargs["fiscal_year"]])}
+        )
+
+    monkeypatch.setattr("cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms", gems)
+    monkeypatch.setattr(
+        "cms_icd.resolution.ICD10KnowledgeBase.from_cms",
+        lambda **_: SimpleNamespace(cm=SimpleNamespace(tabular=tabular)),
+    )
+    calls = []
+    resolver_name = f"_resolve_{kind}_mapping"
+    import cms_icd.resolution as resolution_module
+
+    original = getattr(resolution_module, resolver_name)
+
+    def counted(*args, **kwargs):
+        calls.append(args[0].source)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(resolution_module, resolver_name, counted)
+    options = {
+        "offline": True,
+        "cache_dir": "unused",
+        "corrections_through_fiscal_year": 2018,
+    }
+    mapping = bulk_api((2018, 2017, 2018), **options)
+    frame = bulk_api(iter((2018, 2017, 2018)), output_frame=True, **options)
+    attribute = "target_codes" if kind == "cm" else "target_patterns"
+    expected = [
+        (year, source, list(getattr(record, attribute)))
+        for year, records in mapping.items()
+        for source, record in records.items()
+    ]
+    assert frame.schema == {
+        "fiscal_year": pl.Int16,
+        "source_code": pl.String,
+        "targets": pl.List(pl.String),
+        "effective_date": pl.Datetime("us", "UTC"),
+    }
+    active = frame.filter(pl.col("fiscal_year").is_not_null())
+    assert active.select("fiscal_year", "source_code", "targets").rows() == expected
+    assert active.filter(pl.col("source_code") == "0010")["targets"].to_list() == [
+        [],
+        [],
+    ]
+    assert active.filter(pl.col("source_code") == "0730")["targets"].to_list() == [
+        list(targets),
+        list(targets),
+    ]
+    if kind == "pcs":
+        assert active.filter(pl.col("source_code") == "0040")["targets"].to_list() == [
+            ["0WQF?ZZ"],
+            ["0WQF?ZZ"],
+        ]
+    assert_frame_equal(
+        single_api(fiscal_year=2017, output_frame=True, **options).filter(
+            pl.col("fiscal_year").is_not_null()
+        ),
+        frame.filter(pl.col("fiscal_year") == 2017),
+    )
+    assert single_api(fiscal_year=2017, output_frame=False, **options) is mapping[2017]
+    assert len(calls) == 6
+    assert all(item["offline"] and item["cache_dir"] == "unused" for item in acquired)
+    # Returned frames are independent of the immutable resolution cache.
+    frame.drop_in_place("targets")
+    assert bulk_api((2017,), **options)[2017] is mapping[2017]
+    assert "targets" in bulk_api((2017,), output_frame=True, **options).columns
+
+
+@pytest.mark.parametrize(
+    "bulk_api",
+    [
+        resolve_icd9_to_icd10_cm_mappings,
+        resolve_icd9_to_icd10_pcs_mappings,
+    ],
+)
+def test_empty_frame_has_explicit_schema_without_acquisition(
+    monkeypatch, bulk_api
+) -> None:
+    pl = pytest.importorskip("polars")
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **_: pytest.fail("empty frame request loaded materials"),
+    )
+    frame = bulk_api((), output_frame=True)
+    assert frame.shape == (0, 4)
+    assert frame.schema == {
+        "fiscal_year": pl.Int16,
+        "source_code": pl.String,
+        "targets": pl.List(pl.String),
+        "effective_date": pl.Datetime("us", "UTC"),
+    }
+
+
+@pytest.mark.parametrize(
+    "api,kwargs",
+    [
+        (resolve_icd9_to_icd10_cm_mappings, {}),
+        (resolve_icd9_to_icd10_pcs_mappings, {}),
+        (resolve_icd9_to_icd10_cm_mapping, {"fiscal_year": 2017}),
+        (resolve_icd9_to_icd10_pcs_mapping, {"fiscal_year": 2017}),
+    ],
+)
+def test_missing_polars_fails_before_discovery_or_acquisition(
+    monkeypatch, api, kwargs
+) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "polars", None)
+    monkeypatch.setattr(
+        "cms_icd.resolution._normalize_years",
+        lambda *_, **__: pytest.fail("missing backend started acquisition"),
+    )
+    with pytest.raises(ImportError) as error:
+        api(output_frame=True, **kwargs)
+    assert isinstance(error.value.__cause__, ModuleNotFoundError)
+
+
+def test_mapping_output_does_not_import_polars() -> None:
+    import subprocess
+    import sys
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; from cms_icd import resolve_icd9_to_icd10_cm_mappings; "
+                "assert not resolve_icd9_to_icd10_cm_mappings(()); "
+                "assert 'polars' not in sys.modules"
+            ),
+        ],
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("kind", ["cm", "pcs"])
+@pytest.mark.parametrize("selection", [2016, [2016, 2018], None])
+def test_start_dated_frames_join_asof_without_stale_matches(
+    monkeypatch, kind, selection
+) -> None:
+    pl = pytest.importorskip("polars")
+    model = ICDCMMappingResolution if kind == "cm" else ICDPCSMappingResolution
+    first, second = ("A70", "J17") if kind == "cm" else ("0WQF0ZZ", "0WQF3ZZ")
+
+    def record(source, targets):
+        return model(
+            source,
+            targets,
+            ICDMappingStatus.MAPPED if targets else ICDMappingStatus.UNMAPPABLE,
+            ICDMappingReason.EXACT if targets else ICDMappingReason.OFFICIAL_NO_MAP,
+            False,
+        )
+
+    resolved = {
+        2016: {"0010": record("0010", (first,)), "0040": record("0040", ())},
+        2017: {"0010": record("0010", (second,))},
+        2018: {"0040": record("0040", (second,))},
+    }
+    monkeypatch.setattr(
+        "cms_icd.resolution._discover_years", lambda *_, **__: (2016, 2017, 2018)
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **kw: SimpleNamespace(
+            **{kind: SimpleNamespace(icd9_to_icd10=kw["fiscal_year"])}
+        ),
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution.ICD10KnowledgeBase.from_cms",
+        lambda **_: SimpleNamespace(cm=SimpleNamespace(tabular=None)),
+    )
+    monkeypatch.setattr(
+        "cms_icd.resolution._resolved_year",
+        lambda _kind, year, _tabular: resolved[year],
+    )
+    api = (
+        resolve_icd9_to_icd10_cm_mappings
+        if kind == "cm"
+        else resolve_icd9_to_icd10_pcs_mappings
+    )
+    frame = api(selection, output_frame=True)
+    assert frame["effective_date"].is_sorted()
+    assert not frame.select("source_code", "effective_date").is_duplicated().any()
+    assert frame.filter(pl.col("fiscal_year").is_null())["targets"].null_count() > 0
+    assert "valid_to" not in frame
+    assert api(2016)[2016] == resolved[2016]
+
+    observations = [
+        ("0010", datetime(2015, 9, 30, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("0010", datetime(2015, 10, 1, tzinfo=UTC)),
+        ("0010", datetime(2016, 9, 30, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("0010", datetime(2016, 10, 1, tzinfo=UTC)),
+        ("0010", datetime(2017, 10, 1, tzinfo=UTC)),
+        ("0040", datetime(2015, 10, 1, tzinfo=UTC)),
+        ("0040", datetime(2016, 10, 1, tzinfo=UTC)),
+        ("0040", datetime(2017, 10, 1, tzinfo=UTC)),
+        ("0040", datetime(2018, 10, 1, tzinfo=UTC)),
+        ("unknown", datetime(2016, 1, 1, tzinfo=UTC)),
+    ]
+    events = pl.DataFrame(
+        observations,
+        schema={"source_code": pl.String, "time": pl.Datetime("us", "UTC")},
+        orient="row",
+    )
+    query = (
+        events.lazy()
+        .with_row_index("order")
+        .sort("time")
+        .join_asof(
+            frame.lazy(),
+            by="source_code",
+            left_on="time",
+            right_on="effective_date",
+            strategy="backward",
+            # Both inputs are explicitly sorted by their timestamp. Polars cannot
+            # verify grouped sortedness itself in the supported 1.x releases.
+            check_sortedness=False,
+        )
+        .sort("order")
+    )
+    expected = [
+        None,
+        [first],
+        [first],
+        [second] if selection is None else None,
+        None,
+        [],
+        None,
+        [second] if selection != 2016 else None,
+        None,
+        None,
+    ]
+    assert query.collect()["targets"].to_list() == expected
+    assert query.collect(engine="streaming")["targets"].to_list() == expected
+
+
+@pytest.mark.parametrize("years", [True, [False], [2016, "2017"]])
+def test_year_selectors_reject_non_integer_values(monkeypatch, years) -> None:
+    monkeypatch.setattr(
+        "cms_icd.resolution.GEMKnowledgeBase.corrected_from_cms",
+        lambda **_: pytest.fail("invalid year selector acquired materials"),
+    )
+    with pytest.raises(TypeError):
+        resolve_icd9_to_icd10_cm_mappings(years)
 
 
 def test_default_years_discover_complete_history_through_horizon(

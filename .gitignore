@@ -1,4 +1,5 @@
 /.venv
+/.worktrees/
 
 # Local environment and secret-bearing configuration
 .env

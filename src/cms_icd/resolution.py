@@ -6,8 +6,9 @@ from concurrent.futures import Future
 from datetime import date
 from threading import Lock
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
+from ._frames import _require_polars, _resolution_frame
 from .constants import ICD10_PCS_CHARACTERS
 from .exceptions import ReleaseUnavailableError
 from .gems import GEMKnowledgeBase
@@ -29,6 +30,8 @@ from .sources import CMSProvider
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from pathlib import Path
+
+    import polars as pl
 
     from .stores import GEMStore, TabularStore
 
@@ -427,7 +430,7 @@ def _discover_years(
 
 
 def _normalize_years(
-    fiscal_years: Iterable[int] | None,
+    fiscal_years: int | Iterable[int] | None,
     *,
     kind: Literal["cm", "pcs"],
     corrections_through_fiscal_year: int,
@@ -441,7 +444,9 @@ def _normalize_years(
             cache_dir=cache_dir,
             offline=offline,
         )
-    requested = tuple(fiscal_years)
+    requested = (
+        (fiscal_years,) if isinstance(fiscal_years, int) else tuple(fiscal_years)
+    )
     if any(isinstance(year, bool) or not isinstance(year, int) for year in requested):
         raise TypeError("fiscal_years must contain integers")
     years = tuple(sorted(set(requested)))
@@ -518,19 +523,73 @@ def _resolved_year(
         raise
 
 
+@overload
 def resolve_icd9_to_icd10_cm_mappings(
-    fiscal_years: Iterable[int] | None = None,
+    fiscal_years: int | Iterable[int] | None = None,
     *,
     corrections_through_fiscal_year: int = 2018,
     cache_dir: str | Path | None = None,
     offline: bool = False,
-) -> Mapping[int, Mapping[str, ICDCMMappingResolution]]:
+    output_frame: Literal[False] = False,
+) -> Mapping[int, Mapping[str, ICDCMMappingResolution]]: ...
+
+
+@overload
+def resolve_icd9_to_icd10_cm_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: Literal[True],
+) -> pl.DataFrame: ...
+
+
+@overload
+def resolve_icd9_to_icd10_cm_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool,
+) -> Mapping[int, Mapping[str, ICDCMMappingResolution]] | pl.DataFrame: ...
+
+
+def resolve_icd9_to_icd10_cm_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool = False,
+) -> Mapping[int, Mapping[str, ICDCMMappingResolution]] | pl.DataFrame:
     """Resolve corrected ICD-9-CM diagnosis GEMs for several fiscal years.
 
     The result is a best-effort interpretation of every official source mapping, not a
     one-to-one clinical conversion table. ``None`` selects every compatible advertised
     GEM year through the correction horizon (currently FY2014--FY2018).
+
+    ``fiscal_years`` accepts one integer, an iterable of years, or ``None``.
+
+    Set ``output_frame=True`` to return a Polars DataFrame with ``fiscal_year`` (Int16),
+    ``source_code`` (String), ``targets`` (List(String)), and ``effective_date``
+    (Datetime in UTC, microsecond precision). The frame is sorted by validity start and
+    source code, ready for a backward as-of join grouped by source code.
+
+    Install ``cms-icd[polars]`` to enable frame output.
+
+    Empty target lists retain known unmappable sources; target order and multiplicity
+    are preserved. The default mapping retains full diagnostics and provenance. Frame
+    conversion does not change the resolution policy.
+
+    Each mapping starts on October 1 of the preceding calendar year. Null-target
+    boundary rows terminate coverage at the next October 1 when that source has no
+    mapping in the following selected year; their fiscal year is null. Retain these rows
+    during as-of joins to prevent matching across gaps or beyond coverage.
     """
+    if output_frame:
+        _require_polars()
     years = _normalize_years(
         fiscal_years,
         kind="cm",
@@ -552,21 +611,63 @@ def resolve_icd9_to_icd10_cm_mappings(
             offline=offline,
         ).cm.tabular
         result[year] = _resolved_year("cm", store, tabular)  # type: ignore[assignment]
+    if output_frame:
+        return _resolution_frame(result, kind="cm")
     return MappingProxyType(result)
 
 
+@overload
 def resolve_icd9_to_icd10_pcs_mappings(
-    fiscal_years: Iterable[int] | None = None,
+    fiscal_years: int | Iterable[int] | None = None,
     *,
     corrections_through_fiscal_year: int = 2018,
     cache_dir: str | Path | None = None,
     offline: bool = False,
-) -> Mapping[int, Mapping[str, ICDPCSMappingResolution]]:
+    output_frame: Literal[False] = False,
+) -> Mapping[int, Mapping[str, ICDPCSMappingResolution]]: ...
+
+
+@overload
+def resolve_icd9_to_icd10_pcs_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: Literal[True],
+) -> pl.DataFrame: ...
+
+
+@overload
+def resolve_icd9_to_icd10_pcs_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool,
+) -> Mapping[int, Mapping[str, ICDPCSMappingResolution]] | pl.DataFrame: ...
+
+
+def resolve_icd9_to_icd10_pcs_mappings(
+    fiscal_years: int | Iterable[int] | None = None,
+    *,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool = False,
+) -> Mapping[int, Mapping[str, ICDPCSMappingResolution]] | pl.DataFrame:
     """Resolve corrected ICD-9-CM procedure GEMs for several fiscal years.
 
     The result is a best-effort interpretation. A ``?`` in a target pattern marks an
     ICD-10-PCS axis on which official alternatives disagree.
+
+    Set ``output_frame=True`` for the same start-dated Polars schema as
+    :func:`resolve_icd9_to_icd10_cm_mappings`, with patterns in ``targets``. Patterns
+    retain ``?`` axes and are not necessarily assignable codes.
     """
+    if output_frame:
+        _require_polars()
     years = _normalize_years(
         fiscal_years,
         kind="pcs",
@@ -583,7 +684,42 @@ def resolve_icd9_to_icd10_pcs_mappings(
             offline=offline,
         ).pcs.icd9_to_icd10
         result[year] = _resolved_year("pcs", store, None)  # type: ignore[assignment]
+    if output_frame:
+        return _resolution_frame(result, kind="pcs")
     return MappingProxyType(result)
+
+
+@overload
+def resolve_icd9_to_icd10_cm_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: Literal[False] = False,
+) -> Mapping[str, ICDCMMappingResolution]: ...
+
+
+@overload
+def resolve_icd9_to_icd10_cm_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: Literal[True],
+) -> pl.DataFrame: ...
+
+
+@overload
+def resolve_icd9_to_icd10_cm_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool,
+) -> Mapping[str, ICDCMMappingResolution] | pl.DataFrame: ...
 
 
 def resolve_icd9_to_icd10_cm_mapping(
@@ -592,8 +728,20 @@ def resolve_icd9_to_icd10_cm_mapping(
     corrections_through_fiscal_year: int = 2018,
     cache_dir: str | Path | None = None,
     offline: bool = False,
-) -> Mapping[str, ICDCMMappingResolution]:
-    """Resolve corrected diagnosis mappings for one historical fiscal year."""
+    output_frame: bool = False,
+) -> Mapping[str, ICDCMMappingResolution] | pl.DataFrame:
+    """Resolve corrected diagnosis mappings for one historical fiscal year.
+
+    ``output_frame=True`` returns the bulk API's Polars schema, including fiscal year.
+    """
+    if output_frame:
+        return resolve_icd9_to_icd10_cm_mappings(
+            (fiscal_year,),
+            corrections_through_fiscal_year=corrections_through_fiscal_year,
+            cache_dir=cache_dir,
+            offline=offline,
+            output_frame=True,
+        )
     return resolve_icd9_to_icd10_cm_mappings(
         (fiscal_year,),
         corrections_through_fiscal_year=corrections_through_fiscal_year,
@@ -602,14 +750,59 @@ def resolve_icd9_to_icd10_cm_mapping(
     )[fiscal_year]
 
 
+@overload
 def resolve_icd9_to_icd10_pcs_mapping(
     *,
     fiscal_year: int,
     corrections_through_fiscal_year: int = 2018,
     cache_dir: str | Path | None = None,
     offline: bool = False,
-) -> Mapping[str, ICDPCSMappingResolution]:
-    """Resolve corrected procedure mappings for one historical fiscal year."""
+    output_frame: Literal[False] = False,
+) -> Mapping[str, ICDPCSMappingResolution]: ...
+
+
+@overload
+def resolve_icd9_to_icd10_pcs_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: Literal[True],
+) -> pl.DataFrame: ...
+
+
+@overload
+def resolve_icd9_to_icd10_pcs_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool,
+) -> Mapping[str, ICDPCSMappingResolution] | pl.DataFrame: ...
+
+
+def resolve_icd9_to_icd10_pcs_mapping(
+    *,
+    fiscal_year: int,
+    corrections_through_fiscal_year: int = 2018,
+    cache_dir: str | Path | None = None,
+    offline: bool = False,
+    output_frame: bool = False,
+) -> Mapping[str, ICDPCSMappingResolution] | pl.DataFrame:
+    """Resolve corrected procedure mappings for one historical fiscal year.
+
+    ``output_frame=True`` returns the bulk API's Polars schema, including fiscal year.
+    """
+    if output_frame:
+        return resolve_icd9_to_icd10_pcs_mappings(
+            (fiscal_year,),
+            corrections_through_fiscal_year=corrections_through_fiscal_year,
+            cache_dir=cache_dir,
+            offline=offline,
+            output_frame=True,
+        )
     return resolve_icd9_to_icd10_pcs_mappings(
         (fiscal_year,),
         corrections_through_fiscal_year=corrections_through_fiscal_year,
