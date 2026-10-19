@@ -36,7 +36,7 @@ Issues = "https://github.com/ipolharvard/cms-icd/issues"
 Repository = "https://github.com/ipolharvard/cms-icd"
 
 [project.optional-dependencies]
-polars = ["polars>=1.38,<2.0"]
+polars = ["polars>=1.38,<3.0"]
 dev = ["pre-commit", "pytest"]
 docs = [
     "mkdocs-material",
