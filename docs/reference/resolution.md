@@ -3,7 +3,7 @@
 ## Optional Polars output
 
 Install `cms-icd[polars]` to request a join-ready DataFrame directly from any of
-the four resolvers. The extra supports Polars 1.38 or newer, below 2.0.
+the four resolvers. The extra supports Polars 1.38 or newer, below 3.0.
 
 ```python
 from cms_icd import resolve_icd9_to_icd10_cm_mappings

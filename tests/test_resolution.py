@@ -983,7 +983,7 @@ def test_start_dated_frames_join_asof_without_stale_matches(
             right_on="effective_date",
             strategy="backward",
             # Both inputs are explicitly sorted by their timestamp. Polars cannot
-            # verify grouped sortedness itself in the supported 1.x releases.
+            # verify grouped sortedness itself in the supported releases.
             check_sortedness=False,
         )
         .sort("order")
